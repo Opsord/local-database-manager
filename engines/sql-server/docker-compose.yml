@@ -1,0 +1,22 @@
+services:
+  database:
+    container_name: ${CONTAINER_NAME}
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "Developer"
+      MSSQL_SA_PASSWORD: ${SA_PASSWORD}
+      MSSQL_DB: ${SQLSERVER_DB}
+      MSSQL_SCHEMA: ${SQLSERVER_SCHEMA:-dbo}
+    ports:
+      - "${SQLSERVER_PORT}:1433"
+    volumes:
+      - mssqldata:/var/opt/mssql
+      - ./init:/init:ro
+      - ./docker-entrypoint.sh:/entrypoint.sh:ro
+    entrypoint: ["/bin/bash", "/entrypoint.sh"]
+
+volumes:
+  mssqldata:
+    name: ${SQLSERVER_VOLUME}

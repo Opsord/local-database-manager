@@ -1,0 +1,10 @@
+IF DB_ID(N'$(DB)') IS NULL
+    CREATE DATABASE [$(DB)];
+GO
+
+USE [$(DB)];
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = N'$(SCHEMA)')
+    EXEC('CREATE SCHEMA [$(SCHEMA)]');
+GO
