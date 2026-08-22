@@ -1,6 +1,10 @@
 #!/bin/bash
-set -e
+set -Eeuo pipefail
 
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
-    CREATE SCHEMA IF NOT EXISTS "$POSTGRES_SCHEMA";
+SCHEMA_NAME="${POSTGRES_SCHEMA:-public}"
+DB_USER="${POSTGRES_USER:-postgres}"
+DB_NAME="${POSTGRES_DB:-postgres}"
+
+psql -v ON_ERROR_STOP=1 --username "$DB_USER" --dbname "$DB_NAME" <<-EOSQL
+    CREATE SCHEMA IF NOT EXISTS "$SCHEMA_NAME";
 EOSQL
