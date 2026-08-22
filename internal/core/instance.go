@@ -14,9 +14,10 @@ import (
 type ContainerStatus string
 
 const (
-	StatusRunning ContainerStatus = "RUNNING"
-	StatusStopped ContainerStatus = "STOPPED"
-	StatusUnknown ContainerStatus = "UNKNOWN"
+	StatusReady    ContainerStatus = "READY"
+	StatusStarting ContainerStatus = "STARTING"
+	StatusStopped  ContainerStatus = "STOPPED"
+	StatusUnknown  ContainerStatus = "UNKNOWN"
 )
 
 // DatabaseInstance represents a configured database instance.
@@ -35,6 +36,7 @@ type DatabaseInstance struct {
 	Schema        string            `json:"schema"`
 	Volume        string            `json:"volume"`
 	Status        ContainerStatus   `json:"status"`
+	MemoryUsage   string            `json:"memory_usage"`
 	RawEnv        map[string]string `json:"raw_env"`
 }
 
@@ -129,6 +131,7 @@ func ParseEnvFile(filePath string) (*DatabaseInstance, error) {
 		ContainerName: containerName,
 		ProjectName:   projectName,
 		Status:        StatusStopped,
+		MemoryUsage:   "-",
 		RawEnv:        rawEnv,
 	}
 
@@ -227,6 +230,19 @@ func (d *DatabaseInstance) ConnectionURI() string {
 	default:
 		return fmt.Sprintf("localhost:%d", d.Port)
 	}
+}
+
+// BackendEnvBlock generates a standard multi-variable block ready to paste into application .env files.
+func (d *DatabaseInstance) BackendEnvBlock() string {
+	uri := d.ConnectionURI()
+	return fmt.Sprintf(`DB_ENGINE=%s
+DB_HOST=localhost
+DB_PORT=%d
+DB_USER=%s
+DB_PASSWORD=%s
+DB_NAME=%s
+DB_SCHEMA=%s
+DATABASE_URL=%s`, d.EngineType, d.Port, d.User, d.Password, d.Database, d.Schema, uri)
 }
 
 // CLICommand generates a direct command line invocation string.

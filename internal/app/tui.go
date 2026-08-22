@@ -21,6 +21,10 @@ const (
 
 type clearStatusMsg struct{}
 
+type actionDoneMsg struct {
+	msg string
+}
+
 // AppModel is the root Bubble Tea application state.
 type AppModel struct {
 	projectRoot  string
@@ -77,9 +81,14 @@ func (m *AppModel) reloadInstancesCmd() tea.Cmd {
 			return errMsg{err}
 		}
 
-		// Inspect current status of all instances
+		// Inspect current status and stats of all instances
 		for _, inst := range instances {
 			inst.Status = m.runner.CheckStatus(inst)
+			if inst.Status != core.StatusStopped {
+				inst.MemoryUsage = m.runner.GetMemoryUsage(inst)
+			} else {
+				inst.MemoryUsage = "-"
+			}
 		}
 
 		return instancesLoadedMsg{
@@ -124,6 +133,11 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selectedIndex = 0
 		}
 		return m, nil
+
+	case actionDoneMsg:
+		m.statusMsg = msg.msg
+		m.statusIsErr = false
+		return m, tea.Tick(4*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
 
 	case clearStatusMsg:
 		m.statusMsg = ""

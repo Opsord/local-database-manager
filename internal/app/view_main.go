@@ -22,14 +22,20 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.selectedIndex > 0 {
 				m.selectedIndex--
 			}
-			m.confirmPurge = false
+			if m.confirmPurge {
+				m.confirmPurge = false
+				m.statusMsg = ""
+			}
 			return m, nil
 
 		case "down", "j":
 			if m.selectedIndex < len(m.instances)-1 {
 				m.selectedIndex++
 			}
-			m.confirmPurge = false
+			if m.confirmPurge {
+				m.confirmPurge = false
+				m.statusMsg = ""
+			}
 			return m, nil
 
 		case " ":
@@ -37,6 +43,13 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if inst == nil {
 				return m, nil
 			}
+			m.confirmPurge = false
+			if inst.Status == core.StatusReady || inst.Status == core.StatusStarting {
+				m.statusMsg = fmt.Sprintf("Stopping '%s'...", inst.Name)
+			} else {
+				m.statusMsg = fmt.Sprintf("Starting '%s'...", inst.Name)
+			}
+			m.statusIsErr = false
 			return m, m.toggleInstanceCmd(inst)
 
 		case "c":
@@ -50,6 +63,21 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusIsErr = true
 			} else {
 				m.statusMsg = fmt.Sprintf("✔ URI for '%s' copied to clipboard!", inst.Name)
+				m.statusIsErr = false
+			}
+			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
+
+		case "E", "x":
+			inst := m.selectedInstance()
+			if inst == nil {
+				return m, nil
+			}
+			block := inst.BackendEnvBlock()
+			if err := core.CopyToClipboard(block); err != nil {
+				m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
+				m.statusIsErr = true
+			} else {
+				m.statusMsg = fmt.Sprintf("✔ Backend .env block for '%s' copied to clipboard!", inst.Name)
 				m.statusIsErr = false
 			}
 			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
@@ -85,6 +113,8 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 				inst := m.selectedInstance()
 				m.confirmPurge = false
 				if inst != nil {
+					m.statusMsg = fmt.Sprintf("Purging '%s' and removing volume...", inst.Name)
+					m.statusIsErr = false
 					return m, m.purgeInstanceCmd(inst)
 				}
 			}
@@ -122,9 +152,12 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *AppModel) toggleInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
 	return func() tea.Msg {
 		var err error
-		if inst.Status == core.StatusRunning {
+		var actionName string
+		if inst.Status == core.StatusReady || inst.Status == core.StatusStarting {
+			actionName = "stopped"
 			err = m.runner.Stop(inst)
 		} else {
+			actionName = "started"
 			err = m.runner.Start(inst)
 		}
 
@@ -134,10 +167,14 @@ func (m *AppModel) toggleInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
 
 		// Update state
 		inst.Status = m.runner.CheckStatus(inst)
-		return instancesLoadedMsg{
-			instances:    m.instances,
-			dockerHealth: m.dockerHealth,
-			podmanHealth: m.podmanHealth,
+		if inst.Status != core.StatusStopped {
+			inst.MemoryUsage = m.runner.GetMemoryUsage(inst)
+		} else {
+			inst.MemoryUsage = "-"
+		}
+
+		return actionDoneMsg{
+			msg: fmt.Sprintf("✔ Instance '%s' %s successfully!", inst.Name, actionName),
 		}
 	}
 }
@@ -149,10 +186,9 @@ func (m *AppModel) purgeInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
 			return errMsg{err}
 		}
 		inst.Status = m.runner.CheckStatus(inst)
-		return instancesLoadedMsg{
-			instances:    m.instances,
-			dockerHealth: m.dockerHealth,
-			podmanHealth: m.podmanHealth,
+		inst.MemoryUsage = "-"
+		return actionDoneMsg{
+			msg: fmt.Sprintf("✔ Container and volume for '%s' purged successfully!", inst.Name),
 		}
 	}
 }
@@ -209,9 +245,9 @@ func (m *AppModel) viewMain() string {
 	} else {
 		for i, inst := range m.instances {
 			statusIcon := "🔴"
-			if inst.Status == core.StatusRunning {
+			if inst.Status == core.StatusReady {
 				statusIcon = "🟢"
-			} else if inst.Status == core.StatusUnknown {
+			} else if inst.Status == core.StatusStarting {
 				statusIcon = "🟡"
 			}
 
@@ -254,8 +290,10 @@ func (m *AppModel) viewMain() string {
 		rightContent = NormalItemStyle.Render("Select an instance to view its details.")
 	} else {
 		statusFormatted := StoppedStyle.Render("🔴 STOPPED")
-		if inst.Status == core.StatusRunning {
-			statusFormatted = RunningStyle.Render("🟢 RUNNING")
+		if inst.Status == core.StatusReady {
+			statusFormatted = RunningStyle.Render("🟢 READY (Accepting Connections)")
+		} else if inst.Status == core.StatusStarting {
+			statusFormatted = StartingStyle.Render("🟡 STARTING (Engine Booting / Init...)")
 		} else if inst.Status == core.StatusUnknown {
 			statusFormatted = UnknownStyle.Render("🟡 UNKNOWN")
 		}
@@ -267,6 +305,7 @@ func (m *AppModel) viewMain() string {
 			fmt.Sprintf("%s %s", LabelStyle.Render("Container:"), ValueStyle.Render(inst.ContainerName)),
 			fmt.Sprintf("%s %s", LabelStyle.Render("Project:"), ValueStyle.Render(inst.ProjectName)),
 			fmt.Sprintf("%s %s", LabelStyle.Render("Status:"), statusFormatted),
+			fmt.Sprintf("%s %s", LabelStyle.Render("RAM Usage:"), ValueStyle.Render(inst.MemoryUsage)),
 			fmt.Sprintf("%s %s", LabelStyle.Render("Host Port:"), ValueStyle.Render(fmt.Sprintf("%d", inst.Port))),
 			fmt.Sprintf("%s %s", LabelStyle.Render("Database:"), ValueStyle.Render(inst.Database)),
 			fmt.Sprintf("%s %s", LabelStyle.Render("User:"), ValueStyle.Render(inst.User)),
@@ -312,6 +351,7 @@ func (m *AppModel) viewMain() string {
 		fmt.Sprintf("%s %s", KeyStyle.Render("[↑/↓]"), KeyDescStyle.Render("Navigate")),
 		fmt.Sprintf("%s %s", KeyStyle.Render("[Space]"), KeyDescStyle.Render("Start/Stop")),
 		fmt.Sprintf("%s %s", KeyStyle.Render("[c]"), KeyDescStyle.Render("Copy URI")),
+		fmt.Sprintf("%s %s", KeyStyle.Render("[E]"), KeyDescStyle.Render("Export .env")),
 		fmt.Sprintf("%s %s", KeyStyle.Render("[l]"), KeyDescStyle.Render("Logs")),
 		fmt.Sprintf("%s %s", KeyStyle.Render("[n]"), KeyDescStyle.Render("New")),
 		fmt.Sprintf("%s %s", KeyStyle.Render("[e]"), KeyDescStyle.Render("Edit .env")),

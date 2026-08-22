@@ -3,9 +3,11 @@ package core
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // EngineHealth represents the status of the container runtime daemon.
@@ -105,7 +107,7 @@ func (r *Runner) Start(inst *DatabaseInstance) error {
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to start container: %s (%w)", strings.TrimSpace(errBuf.String()), err)
 	}
-	inst.Status = StatusRunning
+	inst.Status = StatusStarting
 	return nil
 }
 
@@ -120,6 +122,7 @@ func (r *Runner) Stop(inst *DatabaseInstance) error {
 		return fmt.Errorf("failed to stop container: %s (%w)", strings.TrimSpace(errBuf.String()), err)
 	}
 	inst.Status = StatusStopped
+	inst.MemoryUsage = "-"
 	return nil
 }
 
@@ -134,10 +137,11 @@ func (r *Runner) DownVolumes(inst *DatabaseInstance) error {
 		return fmt.Errorf("failed to purge container: %s (%w)", strings.TrimSpace(errBuf.String()), err)
 	}
 	inst.Status = StatusStopped
+	inst.MemoryUsage = "-"
 	return nil
 }
 
-// CheckStatus checks if the container is currently running.
+// CheckStatus checks if the container is running and whether the DB port is ready to accept connections.
 func (r *Runner) CheckStatus(inst *DatabaseInstance) ContainerStatus {
 	bin, args := r.BuildComposeArgs(inst, "ps", "--format", "{{.State}}")
 	cmd := exec.Command(bin, args...)
@@ -150,9 +154,47 @@ func (r *Runner) CheckStatus(inst *DatabaseInstance) ContainerStatus {
 
 	output := strings.ToLower(strings.TrimSpace(outBuf.String()))
 	if strings.Contains(output, "running") || strings.Contains(output, "up") {
-		return StatusRunning
+		if isTCPPortReady(inst.Port) {
+			return StatusReady
+		}
+		return StatusStarting
 	}
 	return StatusStopped
+}
+
+func isTCPPortReady(port int) bool {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 250*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+// GetMemoryUsage retrieves memory consumption stats for the container.
+func (r *Runner) GetMemoryUsage(inst *DatabaseInstance) string {
+	if inst.Status == StatusStopped {
+		return "-"
+	}
+
+	bin := "docker"
+	if inst.Runtime == "podman" {
+		bin = "podman"
+	}
+
+	cmd := exec.Command(bin, "stats", "--no-stream", "--format", "{{.MemUsage}}", inst.ContainerName)
+	var outBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+
+	if err := cmd.Run(); err != nil {
+		return "-"
+	}
+
+	res := strings.TrimSpace(outBuf.String())
+	if res == "" {
+		return "-"
+	}
+	return res
 }
 
 // LogsCommand prepares a command for streaming container logs.

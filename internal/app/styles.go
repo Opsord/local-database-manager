@@ -44,6 +44,10 @@ var (
 			Foreground(SecondaryColor).
 			Bold(true)
 
+	StartingStyle = lipgloss.NewStyle().
+			Foreground(WarningColor).
+			Bold(true)
+
 	StoppedStyle = lipgloss.NewStyle().
 			Foreground(ErrorColor).
 			Bold(true)
@@ -70,6 +74,12 @@ var (
 	CLIBoxStyle = lipgloss.NewStyle().
 			Background(lipgloss.Color("#1E272E")).
 			Foreground(lipgloss.Color("#FFA502")).
+			Padding(0, 1).
+			MarginTop(1)
+
+	EnvBoxStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color("#1E272E")).
+			Foreground(lipgloss.Color("#A4B0BE")).
 			Padding(0, 1).
 			MarginTop(1)
 

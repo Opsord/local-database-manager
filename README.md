@@ -10,7 +10,10 @@ A lightweight, high-performance interactive Terminal User Interface (TUI) built 
 - 📁 **Centralized Instances:** All declarative configurations live in `instances/*.env`.
 - 🏷️ **Custom Container Naming:** Define clean container names (`CONTAINER_NAME`), preventing collisions or default directory prefixes.
 - 🩺 **Runtime Daemon Health Monitoring:** Live status badges in the header (`🟢 Docker: ONLINE`, `🔴 Podman: OFFLINE`).
+- 🩺 **Database Readiness Probe (Real Health Check):** Distinguishes between `🟢 READY (Accepting Connections)` and `🟡 STARTING (Engine Booting / Init...)` via live TCP socket probing.
+- 📊 **Real-time Memory Monitoring:** Displays live container memory consumption (`RAM Usage: 124.5MiB / 15.6GiB`).
 - 📋 **One-Key Connection Copy:** Copy standard connection URIs (`postgresql://...`, `sqlserver://...`) directly to the clipboard with `c`.
+- 📦 **Backend .env Block Export (`E` / `x`):** Copy a complete multi-variable configuration block formatted ready to paste into backend projects.
 - 🪄 **Interactive Creation Wizard (`n`):** Step-by-step form to spin up new database instances with automatic free port detection.
 - 📜 **Real-time Log Streamer (`l`):** Fullscreen live container logs viewport with smooth scrolling.
 - 🧹 **Safe Volume Purge (`d`):** Destroy container and associated data volumes with confirmation.
@@ -58,6 +61,7 @@ local-database-manager/
 | `↑` / `↓` or `k` / `j` | Navigate | Move cursor through configured database instances |
 | `Space` | Start / Stop | Toggle container state (`up -d` / `down`) |
 | `c` | Copy URI | Copy full connection URI (`postgresql://...`) to clipboard |
+| `E` / `x` | Export .env | Copy complete backend `.env` block to clipboard |
 | `l` | Live Logs | Open real-time log viewer (`Esc` / `q` to return) |
 | `n` | New Instance | Open interactive instance creation wizard |
 | `e` | Edit `.env` | Open instance configuration in your default editor (`code` / `notepad`) |

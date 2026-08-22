@@ -257,6 +257,7 @@ COMPOSE_PROJECT_NAME=%s
 SQLSERVER_PORT=%s
 SA_PASSWORD=%s
 SQLSERVER_DB=%s
+SQLSERVER_SCHEMA=dbo
 SQLSERVER_VOLUME=%s
 `, runtime, containerName, containerName, port, pass, db, volume)
 	}

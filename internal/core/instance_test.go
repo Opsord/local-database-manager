@@ -3,6 +3,7 @@ package core
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -70,6 +71,11 @@ POSTGRES_VOLUME=pgdata_test
 	if cli := inst.CLICommand(); cli != expectedCLI {
 		t.Errorf("expected CLI '%s', got '%s'", expectedCLI, cli)
 	}
+
+	envBlock := inst.BackendEnvBlock()
+	if !strings.Contains(envBlock, "DB_HOST=localhost") || !strings.Contains(envBlock, "DATABASE_URL="+expectedURI) {
+		t.Errorf("BackendEnvBlock failed: got '%s'", envBlock)
+	}
 }
 
 func TestParseEnvFile_SQLServer(t *testing.T) {
@@ -85,6 +91,7 @@ COMPOSE_PROJECT_NAME=sql-test-app
 SQLSERVER_PORT=1434
 SA_PASSWORD=SuperSecretPass123!
 SQLSERVER_DB=orders_db
+SQLSERVER_SCHEMA=custom_dbo
 SQLSERVER_VOLUME=sql_orders_data
 `
 	if err := os.WriteFile(envPath, []byte(content), 0644); err != nil {
@@ -111,9 +118,17 @@ SQLSERVER_VOLUME=sql_orders_data
 	if inst.Database != "orders_db" {
 		t.Errorf("expected Database 'orders_db', got '%s'", inst.Database)
 	}
+	if inst.Schema != "custom_dbo" {
+		t.Errorf("expected Schema 'custom_dbo', got '%s'", inst.Schema)
+	}
 
 	expectedURI := "sqlserver://sa:SuperSecretPass123%21@localhost:1434?database=orders_db"
 	if uri := inst.ConnectionURI(); uri != expectedURI {
 		t.Errorf("expected URI '%s', got '%s'", expectedURI, uri)
+	}
+
+	envBlock := inst.BackendEnvBlock()
+	if !strings.Contains(envBlock, "DB_PORT=1434") || !strings.Contains(envBlock, "DB_SCHEMA=custom_dbo") {
+		t.Errorf("BackendEnvBlock failed: got '%s'", envBlock)
 	}
 }
