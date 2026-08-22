@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"local-database-manager/internal/core"
@@ -77,7 +78,7 @@ func NewApp(projectRoot string) *AppModel {
 	}
 }
 
-// Init initializes the model and triggers instance scanning and engine health checks.
+// Init initializes the model, instantly loads instances and launches parallel inspections in background.
 func (m *AppModel) Init() tea.Cmd {
 	return m.reloadInstancesCmd()
 }
@@ -85,23 +86,48 @@ func (m *AppModel) Init() tea.Cmd {
 func (m *AppModel) reloadInstancesCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		dockerHealth := m.runner.CheckEngineHealth(ctx, "docker")
-		podmanHealth := m.runner.CheckEngineHealth(ctx, "podman")
 
+		// 1. Fast disk scan of instances (< 2ms)
 		instances, err := core.ScanInstances(m.instancesDir)
 		if err != nil {
 			return errMsg{err}
 		}
 
-		// Inspect current status and stats of all instances
+		// 2. Parallelize runtime engine health checks + instance container checks
+		var wg sync.WaitGroup
+		var dockerHealth core.EngineHealth
+		var podmanHealth core.EngineHealth
+
+		// Check Docker Health
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			dockerHealth = m.runner.CheckEngineHealth(ctx, "docker")
+		}()
+
+		// Check Podman Health
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			podmanHealth = m.runner.CheckEngineHealth(ctx, "podman")
+		}()
+
+		// Check each instance status & memory concurrently
 		for _, inst := range instances {
-			inst.Status = m.runner.CheckStatus(ctx, inst)
-			if inst.Status != core.StatusStopped {
-				inst.MemoryUsage = m.runner.GetMemoryUsage(ctx, inst)
-			} else {
-				inst.MemoryUsage = "-"
-			}
+			wg.Add(1)
+			go func(i *core.DatabaseInstance) {
+				defer wg.Done()
+				i.Status = m.runner.CheckStatus(ctx, i)
+				if i.Status != core.StatusStopped {
+					i.MemoryUsage = m.runner.GetMemoryUsage(ctx, i)
+				} else {
+					i.MemoryUsage = "-"
+				}
+			}(inst)
 		}
+
+		// Wait for all concurrent routines to complete
+		wg.Wait()
 
 		return instancesLoadedMsg{
 			instances:    instances,

@@ -163,16 +163,26 @@ func (r *Runner) DownVolumes(ctx context.Context, inst *DatabaseInstance) error 
 
 // CheckStatus checks if the container is running and whether the DB port is ready to accept connections.
 func (r *Runner) CheckStatus(ctx context.Context, inst *DatabaseInstance) ContainerStatus {
-	cmdCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	cmdCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	bin, args := r.BuildComposeArgs(inst, "ps", "--format", "{{.State}}")
-	cmd := exec.CommandContext(cmdCtx, bin, args...)
+	bin := "docker"
+	if inst.Runtime == "podman" {
+		bin = "podman"
+	}
+
+	cmd := exec.CommandContext(cmdCtx, bin, "ps", "--filter", fmt.Sprintf("name=^/%s$|^%s$", inst.ContainerName, inst.ContainerName), "--format", "{{.State}}")
 	var outBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 
 	if err := cmd.Run(); err != nil {
-		return StatusStopped
+		// Fallback to compose ps
+		bin, args := r.BuildComposeArgs(inst, "ps", "--format", "{{.State}}")
+		cmd = exec.CommandContext(cmdCtx, bin, args...)
+		cmd.Stdout = &outBuf
+		if err := cmd.Run(); err != nil {
+			return StatusStopped
+		}
 	}
 
 	output := strings.ToLower(strings.TrimSpace(outBuf.String()))
@@ -186,7 +196,7 @@ func (r *Runner) CheckStatus(ctx context.Context, inst *DatabaseInstance) Contai
 }
 
 func isTCPPortReady(port int) bool {
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 250*time.Millisecond)
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 200*time.Millisecond)
 	if err != nil {
 		return false
 	}
@@ -205,7 +215,7 @@ func (r *Runner) GetMemoryUsage(ctx context.Context, inst *DatabaseInstance) str
 		bin = "podman"
 	}
 
-	cmdCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	cmdCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(cmdCtx, bin, "stats", "--no-stream", "--format", "{{.MemUsage}}", inst.ContainerName)
