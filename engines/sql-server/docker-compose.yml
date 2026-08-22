@@ -3,12 +3,14 @@ services:
     container_name: ${CONTAINER_NAME}
     image: mcr.microsoft.com/mssql/server:2022-latest
     restart: unless-stopped
+    mem_limit: ${MEMORY_LIMIT:-2048m}
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_PID: "Developer"
       MSSQL_SA_PASSWORD: ${SA_PASSWORD}
       MSSQL_DB: ${SQLSERVER_DB}
       MSSQL_SCHEMA: ${SQLSERVER_SCHEMA:-dbo}
+      MSSQL_MEMORY_LIMIT_MB: ${MSSQL_MEMORY_LIMIT_MB:-2048}
     ports:
       - "${SQLSERVER_PORT}:1433"
     volumes:

@@ -202,9 +202,12 @@ func (m *AppModel) viewMain() string {
 	if rightWidth < 40 {
 		rightWidth = 40
 	}
-	contentHeight := m.height - 9
-	if contentHeight < 10 {
-		contentHeight = 10
+	contentHeight := m.height - 7
+	if contentHeight < 11 {
+		contentHeight = 11
+	}
+	if contentHeight > 14 {
+		contentHeight = 14
 	}
 
 	// 1. Top Header Banner with Engine Health Badges
@@ -283,7 +286,7 @@ func (m *AppModel) viewMain() string {
 			),
 		)
 
-	// 3. Right Panel (Details)
+	// 3. Right Panel (Details - Compact 2-column key-value grid)
 	var rightContent string
 	inst := m.selectedInstance()
 	if inst == nil {
@@ -291,33 +294,51 @@ func (m *AppModel) viewMain() string {
 	} else {
 		statusFormatted := StoppedStyle.Render("🔴 STOPPED")
 		if inst.Status == core.StatusReady {
-			statusFormatted = RunningStyle.Render("🟢 READY (Accepting Connections)")
+			statusFormatted = RunningStyle.Render("🟢 READY")
 		} else if inst.Status == core.StatusStarting {
-			statusFormatted = StartingStyle.Render("🟡 STARTING (Engine Booting / Init...)")
+			statusFormatted = StartingStyle.Render("🟡 STARTING")
 		} else if inst.Status == core.StatusUnknown {
 			statusFormatted = UnknownStyle.Render("🟡 UNKNOWN")
 		}
 
 		engineDesc := fmt.Sprintf("%s (%s)", strings.ToUpper(inst.EngineType), strings.ToUpper(inst.Runtime))
+		memFormatted := fmt.Sprintf("%s (Limit: %s)", inst.MemoryUsage, inst.MemoryLimit)
+
+		col1W := 32
+		col2W := rightWidth - col1W - 8
+		if col2W < 20 {
+			col2W = 20
+		}
+
+		row1 := lipgloss.JoinHorizontal(lipgloss.Top,
+			lipgloss.NewStyle().Width(col1W).Render(fmt.Sprintf("%s %s", LabelStyle.Render("Engine:"), ValueStyle.Render(engineDesc))),
+			lipgloss.NewStyle().Width(col2W).Render(fmt.Sprintf("%s %s", LabelStyle.Render("Container:"), ValueStyle.Render(inst.ContainerName))),
+		)
+		row2 := lipgloss.JoinHorizontal(lipgloss.Top,
+			lipgloss.NewStyle().Width(col1W).Render(fmt.Sprintf("%s %s", LabelStyle.Render("Status:"), statusFormatted)),
+			lipgloss.NewStyle().Width(col2W).Render(fmt.Sprintf("%s %s", LabelStyle.Render("RAM (Limit):"), ValueStyle.Render(memFormatted))),
+		)
+		row3 := lipgloss.JoinHorizontal(lipgloss.Top,
+			lipgloss.NewStyle().Width(col1W).Render(fmt.Sprintf("%s %s", LabelStyle.Render("Database:"), ValueStyle.Render(inst.Database))),
+			lipgloss.NewStyle().Width(col2W).Render(fmt.Sprintf("%s %s", LabelStyle.Render("Host Port:"), ValueStyle.Render(fmt.Sprintf("%d", inst.Port)))),
+		)
+		row4 := lipgloss.JoinHorizontal(lipgloss.Top,
+			lipgloss.NewStyle().Width(col1W).Render(fmt.Sprintf("%s %s", LabelStyle.Render("User:"), ValueStyle.Render(inst.User))),
+			lipgloss.NewStyle().Width(col2W).Render(fmt.Sprintf("%s %s", LabelStyle.Render("Schema:"), ValueStyle.Render(inst.Schema))),
+		)
+		row5 := lipgloss.JoinHorizontal(lipgloss.Top,
+			lipgloss.NewStyle().Width(col1W).Render(fmt.Sprintf("%s %s", LabelStyle.Render("Volume:"), ValueStyle.Render(inst.Volume))),
+			lipgloss.NewStyle().Width(col2W).Render(fmt.Sprintf("%s %s", LabelStyle.Render("Project:"), ValueStyle.Render(inst.ProjectName))),
+		)
 
 		details := []string{
-			fmt.Sprintf("%s %s", LabelStyle.Render("Engine:"), ValueStyle.Render(engineDesc)),
-			fmt.Sprintf("%s %s", LabelStyle.Render("Container:"), ValueStyle.Render(inst.ContainerName)),
-			fmt.Sprintf("%s %s", LabelStyle.Render("Project:"), ValueStyle.Render(inst.ProjectName)),
-			fmt.Sprintf("%s %s", LabelStyle.Render("Status:"), statusFormatted),
-			fmt.Sprintf("%s %s", LabelStyle.Render("RAM Usage:"), ValueStyle.Render(inst.MemoryUsage)),
-			fmt.Sprintf("%s %s", LabelStyle.Render("Host Port:"), ValueStyle.Render(fmt.Sprintf("%d", inst.Port))),
-			fmt.Sprintf("%s %s", LabelStyle.Render("Database:"), ValueStyle.Render(inst.Database)),
-			fmt.Sprintf("%s %s", LabelStyle.Render("User:"), ValueStyle.Render(inst.User)),
-			fmt.Sprintf("%s %s", LabelStyle.Render("Schema:"), ValueStyle.Render(inst.Schema)),
-			fmt.Sprintf("%s %s", LabelStyle.Render("Volume:"), ValueStyle.Render(inst.Volume)),
-			fmt.Sprintf("%s %s", LabelStyle.Render("File:"), ValueStyle.Render(inst.EnvFilePath)),
-			"",
-			LabelStyle.Render("Connection URI ([c] to copy):"),
-			URIBoxStyle.Width(rightWidth - 4).Render(inst.ConnectionURI()),
-			"",
-			LabelStyle.Render("Direct CLI Command:"),
-			CLIBoxStyle.Width(rightWidth - 4).Render(inst.CLICommand()),
+			row1,
+			row2,
+			row3,
+			row4,
+			row5,
+			fmt.Sprintf("%s %s", LabelStyle.Render("URI:"), URIBoxStyle.Width(rightWidth-18).Render(inst.ConnectionURI())),
+			fmt.Sprintf("%s %s", LabelStyle.Render("CLI:"), CLIBoxStyle.Width(rightWidth-18).Render(inst.CLICommand())),
 		}
 		rightContent = lipgloss.JoinVertical(lipgloss.Left, details...)
 	}
@@ -369,5 +390,5 @@ func (m *AppModel) viewMain() string {
 		),
 	)
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, "", mainSplit, footer)
+	return lipgloss.JoinVertical(lipgloss.Left, header, mainSplit, footer)
 }

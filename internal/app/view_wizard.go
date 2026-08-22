@@ -25,6 +25,7 @@ const (
 	StepDatabase
 	StepVolume
 	StepPassword
+	StepMemoryLimit
 	StepReview
 )
 
@@ -48,7 +49,7 @@ func newWizardModel(projectRoot, instancesDir string, existing []*core.DatabaseI
 	engines := []string{"postgres", "sqlserver"}
 	runtimes := []string{"docker", "podman"}
 
-	inputs := make([]textinput.Model, 6)
+	inputs := make([]textinput.Model, 7)
 
 	// StepName (inputs[0])
 	inputs[0] = textinput.New()
@@ -75,6 +76,10 @@ func newWizardModel(projectRoot, instancesDir string, existing []*core.DatabaseI
 	// StepPassword (inputs[5])
 	inputs[5] = textinput.New()
 	inputs[5].SetValue("postgres")
+
+	// StepMemoryLimit (inputs[6])
+	inputs[6] = textinput.New()
+	inputs[6].SetValue("512M")
 
 	return wizardModel{
 		projectRoot:        projectRoot,
@@ -123,12 +128,14 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				prefix := "pg"
 				defaultPort := 5432
 				defaultPass := "postgres"
+				defaultMem := "512M"
 				volPrefix := "pgdata"
 
 				if engine == "sqlserver" {
 					prefix = "sql"
 					defaultPort = 1433
 					defaultPass = "SuperPassword123!"
+					defaultMem = "2G"
 					volPrefix = "sqlserver"
 				}
 
@@ -147,6 +154,9 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if w.inputs[5].Value() == "" || w.inputs[5].Value() == "postgres" {
 					w.inputs[5].SetValue(defaultPass)
+				}
+				if w.inputs[6].Value() == "" || w.inputs[6].Value() == "512M" {
+					w.inputs[6].SetValue(defaultMem)
 				}
 
 				w.step = StepContainerName
@@ -174,6 +184,11 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 
 			case StepPassword:
+				w.step = StepMemoryLimit
+				w.inputs[6].Focus()
+				return m, nil
+
+			case StepMemoryLimit:
 				w.step = StepReview
 				return m, nil
 
@@ -211,7 +226,7 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Update text inputs
-	if w.step >= StepName && w.step <= StepPassword {
+	if w.step >= StepName && w.step <= StepMemoryLimit {
 		idx := int(w.step) - int(StepName)
 		var cmd tea.Cmd
 		w.inputs[idx], cmd = w.inputs[idx].Update(msg)
@@ -228,6 +243,10 @@ func (w *wizardModel) saveInstance() error {
 	db := strings.TrimSpace(w.inputs[3].Value())
 	volume := strings.TrimSpace(w.inputs[4].Value())
 	pass := strings.TrimSpace(w.inputs[5].Value())
+	memLimit := strings.TrimSpace(w.inputs[6].Value())
+	if memLimit == "" {
+		memLimit = "512M"
+	}
 
 	engine := w.engines[w.selectedEngineIdx]
 	runtime := w.runtimes[w.selectedRuntimeIdx]
@@ -239,6 +258,7 @@ RUNTIME=%s
 
 CONTAINER_NAME=%s
 COMPOSE_PROJECT_NAME=%s
+MEMORY_LIMIT=%s
 
 POSTGRES_PORT=%s
 POSTGRES_USER=postgres
@@ -246,20 +266,21 @@ POSTGRES_PASSWORD=%s
 POSTGRES_DB=%s
 POSTGRES_SCHEMA=public
 POSTGRES_VOLUME=%s
-`, runtime, containerName, containerName, port, pass, db, volume)
+`, runtime, containerName, containerName, memLimit, port, pass, db, volume)
 	} else {
 		content = fmt.Sprintf(`ENGINE=sqlserver
 RUNTIME=%s
 
 CONTAINER_NAME=%s
 COMPOSE_PROJECT_NAME=%s
+MEMORY_LIMIT=%s
 
 SQLSERVER_PORT=%s
 SA_PASSWORD=%s
 SQLSERVER_DB=%s
 SQLSERVER_SCHEMA=dbo
 SQLSERVER_VOLUME=%s
-`, runtime, containerName, containerName, port, pass, db, volume)
+`, runtime, containerName, containerName, memLimit, port, pass, db, volume)
 	}
 
 	filePath := filepath.Join(w.instancesDir, fmt.Sprintf("%s.env", name))
@@ -327,6 +348,15 @@ func (m *AppModel) viewWizard() string {
 	}
 	if w.step >= StepPassword {
 		content = append(content, fmt.Sprintf("8. Password: %s", w.inputs[5].View()))
+	}
+	if w.step >= StepMemoryLimit {
+		engine := w.engines[w.selectedEngineIdx]
+		recommendation := "(Recommended: 512M - 1G)"
+		if engine == "sqlserver" {
+			recommendation = "(Recommended: 2G minimum for MSSQL)"
+		}
+		content = append(content, fmt.Sprintf("9. Memory Limit %s: %s", MutedColor, w.inputs[6].View()))
+		content = append(content, KeyDescStyle.Render(fmt.Sprintf("   %s", recommendation)))
 	}
 
 	if w.step == StepReview {

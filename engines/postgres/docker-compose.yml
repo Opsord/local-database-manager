@@ -3,6 +3,7 @@ services:
     container_name: ${CONTAINER_NAME}
     image: postgres:18
     restart: unless-stopped
+    mem_limit: ${MEMORY_LIMIT:-512m}
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}

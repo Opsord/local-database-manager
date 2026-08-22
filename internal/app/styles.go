@@ -60,7 +60,7 @@ var (
 	LabelStyle = lipgloss.NewStyle().
 			Foreground(MutedColor).
 			Bold(true).
-			Width(16)
+			Width(14)
 
 	ValueStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFFFF"))
@@ -68,20 +68,17 @@ var (
 	URIBoxStyle = lipgloss.NewStyle().
 			Background(lipgloss.Color("#1E272E")).
 			Foreground(lipgloss.Color("#00D2D3")).
-			Padding(0, 1).
-			MarginTop(1)
+			Padding(0, 1)
 
 	CLIBoxStyle = lipgloss.NewStyle().
 			Background(lipgloss.Color("#1E272E")).
 			Foreground(lipgloss.Color("#FFA502")).
-			Padding(0, 1).
-			MarginTop(1)
+			Padding(0, 1)
 
 	EnvBoxStyle = lipgloss.NewStyle().
 			Background(lipgloss.Color("#1E272E")).
 			Foreground(lipgloss.Color("#A4B0BE")).
-			Padding(0, 1).
-			MarginTop(1)
+			Padding(0, 1)
 
 	// Footer & Status Bar
 	StatusBarStyle = lipgloss.NewStyle().

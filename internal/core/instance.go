@@ -37,6 +37,7 @@ type DatabaseInstance struct {
 	Volume        string            `json:"volume"`
 	Status        ContainerStatus   `json:"status"`
 	MemoryUsage   string            `json:"memory_usage"`
+	MemoryLimit   string            `json:"memory_limit"`
 	RawEnv        map[string]string `json:"raw_env"`
 }
 
@@ -122,6 +123,15 @@ func ParseEnvFile(filePath string) (*DatabaseInstance, error) {
 		projectName = containerName
 	}
 
+	memLimit := rawEnv["MEMORY_LIMIT"]
+	if memLimit == "" {
+		if engine == "sqlserver" {
+			memLimit = "2G"
+		} else {
+			memLimit = "512M"
+		}
+	}
+
 	inst := &DatabaseInstance{
 		ID:            instanceName,
 		Name:          instanceName,
@@ -132,6 +142,7 @@ func ParseEnvFile(filePath string) (*DatabaseInstance, error) {
 		ProjectName:   projectName,
 		Status:        StatusStopped,
 		MemoryUsage:   "-",
+		MemoryLimit:   memLimit,
 		RawEnv:        rawEnv,
 	}
 
