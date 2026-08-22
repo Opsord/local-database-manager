@@ -202,12 +202,12 @@ func (m *AppModel) viewMain() string {
 	if rightWidth < 40 {
 		rightWidth = 40
 	}
-	contentHeight := m.height - 7
-	if contentHeight < 11 {
-		contentHeight = 11
+	contentHeight := m.height - 6
+	if contentHeight < 15 {
+		contentHeight = 15
 	}
-	if contentHeight > 14 {
-		contentHeight = 14
+	if contentHeight > 24 {
+		contentHeight = 24
 	}
 
 	// 1. Top Header Banner with Engine Health Badges
@@ -337,6 +337,7 @@ func (m *AppModel) viewMain() string {
 			row3,
 			row4,
 			row5,
+			"",
 			fmt.Sprintf("%s %s", LabelStyle.Render("URI:"), URIBoxStyle.Width(rightWidth-18).Render(inst.ConnectionURI())),
 			fmt.Sprintf("%s %s", LabelStyle.Render("CLI:"), CLIBoxStyle.Width(rightWidth-18).Render(inst.CLICommand())),
 		}
