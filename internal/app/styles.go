@@ -3,15 +3,21 @@ package app
 import "github.com/charmbracelet/lipgloss"
 
 var (
-	// Colors
-	PrimaryColor   = lipgloss.Color("#7D56F4")
-	SecondaryColor = lipgloss.Color("#04B575")
-	ErrorColor     = lipgloss.Color("#FF4757")
-	WarningColor   = lipgloss.Color("#FFA502")
-	MutedColor     = lipgloss.Color("#747D8C")
-	BorderColor    = lipgloss.Color("#57606F")
-	SelectedBg     = lipgloss.Color("#2F3542")
-	HeaderBg       = lipgloss.Color("#5352ED")
+	// Night Owl Color Palette
+	BgDark         = lipgloss.Color("#011627")
+	BgSurface      = lipgloss.Color("#0b2942")
+	FgText         = lipgloss.Color("#D6DEEB")
+	PrimaryColor   = lipgloss.Color("#82AAFF") // Functions / Blue Accent
+	SecondaryColor = lipgloss.Color("#ADDB67") // Support / Neon Green
+	AccentColor    = lipgloss.Color("#C792EA") // Keywords / Lavender Purple
+	TealColor      = lipgloss.Color("#7FDBCA") // Variables / Cyan
+	WarningColor   = lipgloss.Color("#ECC48D") // Numbers / Soft Gold
+	ErrorColor     = lipgloss.Color("#EF5350") // Coral Red
+	MutedColor     = lipgloss.Color("#5F7E97") // Search highlight / Slate
+	BorderColor    = lipgloss.Color("#1D3B53") // Deep Navy Border
+	BorderActive   = lipgloss.Color("#82AAFF") // Active Blue Border
+	SelectedBg     = lipgloss.Color("#1D3B53") // Active Selection
+	HeaderBg       = lipgloss.Color("#0b2942")
 
 	// Box Styles
 	PanelStyle = lipgloss.NewStyle().
@@ -21,14 +27,18 @@ var (
 
 	ActivePanelStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(PrimaryColor).
+				BorderForeground(BorderActive).
 				Padding(0, 1)
 
 	TitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#FFFFFF")).
+			Foreground(BgDark).
 			Background(PrimaryColor).
 			Padding(0, 1)
+
+	SubTitleStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(AccentColor)
 
 	// List Item Styles
 	SelectedItemStyle = lipgloss.NewStyle().
@@ -37,7 +47,7 @@ var (
 				Foreground(lipgloss.Color("#FFFFFF"))
 
 	NormalItemStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#F1F2F6"))
+			Foreground(FgText)
 
 	// Status Indicator Styles
 	RunningStyle = lipgloss.NewStyle().
@@ -63,27 +73,31 @@ var (
 			Width(14)
 
 	ValueStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF"))
+			Foreground(FgText)
+
+	ValueHighlightStyle = lipgloss.NewStyle().
+				Foreground(TealColor).
+				Bold(true)
 
 	URIBoxStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#1E272E")).
-			Foreground(lipgloss.Color("#00D2D3")).
+			Background(BgDark).
+			Foreground(TealColor).
 			Padding(0, 1)
 
 	CLIBoxStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#1E272E")).
-			Foreground(lipgloss.Color("#FFA502")).
+			Background(BgDark).
+			Foreground(WarningColor).
 			Padding(0, 1)
 
 	EnvBoxStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#1E272E")).
-			Foreground(lipgloss.Color("#A4B0BE")).
+			Background(BgDark).
+			Foreground(FgText).
 			Padding(0, 1)
 
 	// Footer & Status Bar
 	StatusBarStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(lipgloss.Color("#2F3542")).
+			Foreground(FgText).
+			Background(BgSurface).
 			Padding(0, 1)
 
 	KeyStyle = lipgloss.NewStyle().
@@ -91,5 +105,9 @@ var (
 			Bold(true)
 
 	KeyDescStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#CED6E0"))
+			Foreground(FgText)
+
+	BadgeStyle = lipgloss.NewStyle().
+			Background(SelectedBg).
+			Padding(0, 1)
 )

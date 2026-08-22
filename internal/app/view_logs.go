@@ -106,8 +106,13 @@ func (m *AppModel) updateLogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *AppModel) viewLogs() string {
-	header := TitleStyle.Render(fmt.Sprintf(" Live Logs: %s ", m.logs.instName))
-	footer := StatusBarStyle.Width(m.width - 4).Render("Press [Esc] or [q] to return to main menu. Use [↑/↓] or [PgUp/PgDn] to scroll.")
+	header := TitleStyle.Render(fmt.Sprintf(" Logs: %s ", m.logs.instName))
+	footer := StatusBarStyle.Width(m.width - 4).Render(
+		fmt.Sprintf(" %s %s",
+			lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true).Render("[Esc/q] Return"),
+			lipgloss.NewStyle().Foreground(FgText).Render("  │  [↑/↓] or [PgUp/PgDn] Scroll"),
+		),
+	)
 
 	return ActivePanelStyle.
 		Width(m.width - 4).

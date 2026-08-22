@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"local-database-manager/internal/core"
@@ -18,6 +19,8 @@ const (
 	ModeMain AppMode = iota
 	ModeWizard
 	ModeLogs
+	ModeActionMenu
+	ModeHelp
 )
 
 type clearStatusMsg struct{}
@@ -35,6 +38,13 @@ type AppModel struct {
 	mode          AppMode
 	instances     []*core.DatabaseInstance
 	selectedIndex int
+
+	// Search / Filter
+	isFiltering   bool
+	filterInput   string
+
+	// Action Menu
+	actionMenuIndex int
 
 	dockerHealth core.EngineHealth
 	podmanHealth core.EngineHealth
@@ -113,6 +123,33 @@ type errMsg struct {
 
 func (e errMsg) Error() string { return e.err.Error() }
 
+// filteredInstances returns the list of instances matching filterInput
+func (m *AppModel) filteredInstances() []*core.DatabaseInstance {
+	if !m.isFiltering || strings.TrimSpace(m.filterInput) == "" {
+		return m.instances
+	}
+	query := strings.ToLower(strings.TrimSpace(m.filterInput))
+	var filtered []*core.DatabaseInstance
+	for _, inst := range m.instances {
+		if strings.Contains(strings.ToLower(inst.Name), query) ||
+			strings.Contains(strings.ToLower(inst.EngineType), query) ||
+			strings.Contains(strings.ToLower(inst.Runtime), query) ||
+			strings.Contains(strings.ToLower(inst.Database), query) ||
+			strings.Contains(fmt.Sprintf("%d", inst.Port), query) {
+			filtered = append(filtered, inst)
+		}
+	}
+	return filtered
+}
+
+func (m *AppModel) selectedInstance() *core.DatabaseInstance {
+	list := m.filteredInstances()
+	if len(list) == 0 || m.selectedIndex < 0 || m.selectedIndex >= len(list) {
+		return nil
+	}
+	return list[m.selectedIndex]
+}
+
 // Update handles application state transitions and messages.
 func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -128,10 +165,11 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dockerHealth = msg.dockerHealth
 		m.podmanHealth = msg.podmanHealth
 
-		if m.selectedIndex >= len(m.instances) {
-			m.selectedIndex = len(m.instances) - 1
+		list := m.filteredInstances()
+		if m.selectedIndex >= len(list) {
+			m.selectedIndex = len(list) - 1
 		}
-		if m.selectedIndex < 0 && len(m.instances) > 0 {
+		if m.selectedIndex < 0 && len(list) > 0 {
 			m.selectedIndex = 0
 		}
 		return m, nil
@@ -157,6 +195,10 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateWizard(msg)
 	case ModeLogs:
 		return m.updateLogs(msg)
+	case ModeActionMenu:
+		return m.updateActionMenu(msg)
+	case ModeHelp:
+		return m.updateHelp(msg)
 	default:
 		return m.updateMain(msg)
 	}
@@ -173,14 +215,11 @@ func (m *AppModel) View() string {
 		return m.viewWizard()
 	case ModeLogs:
 		return m.viewLogs()
+	case ModeActionMenu:
+		return m.viewActionMenu()
+	case ModeHelp:
+		return m.viewHelp()
 	default:
 		return m.viewMain()
 	}
-}
-
-func (m *AppModel) selectedInstance() *core.DatabaseInstance {
-	if len(m.instances) == 0 || m.selectedIndex < 0 || m.selectedIndex >= len(m.instances) {
-		return nil
-	}
-	return m.instances[m.selectedIndex]
 }

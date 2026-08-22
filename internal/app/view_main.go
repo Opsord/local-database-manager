@@ -15,9 +15,65 @@ import (
 func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// If in live search/filtering mode
+		if m.isFiltering {
+			switch msg.String() {
+			case "esc":
+				m.isFiltering = false
+				m.filterInput = ""
+				m.selectedIndex = 0
+				return m, nil
+			case "enter":
+				m.isFiltering = false
+				return m, nil
+			case "backspace":
+				if len(m.filterInput) > 0 {
+					m.filterInput = m.filterInput[:len(m.filterInput)-1]
+					m.selectedIndex = 0
+				}
+				return m, nil
+			case "up", "k":
+				if m.selectedIndex > 0 {
+					m.selectedIndex--
+				}
+				return m, nil
+			case "down", "j":
+				list := m.filteredInstances()
+				if m.selectedIndex < len(list)-1 {
+					m.selectedIndex++
+				}
+				return m, nil
+			default:
+				// Filter printable runes
+				if len(msg.String()) == 1 && msg.Runes != nil && len(msg.Runes) > 0 {
+					m.filterInput += msg.String()
+					m.selectedIndex = 0
+					return m, nil
+				}
+			}
+		}
+
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
+
+		case "?":
+			m.mode = ModeHelp
+			return m, nil
+
+		case "/":
+			m.isFiltering = true
+			m.filterInput = ""
+			m.selectedIndex = 0
+			return m, nil
+
+		case "enter":
+			inst := m.selectedInstance()
+			if inst != nil {
+				m.mode = ModeActionMenu
+				m.actionMenuIndex = 0
+				return m, nil
+			}
 
 		case "up", "k":
 			if m.selectedIndex > 0 {
@@ -30,7 +86,8 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "down", "j":
-			if m.selectedIndex < len(m.instances)-1 {
+			list := m.filteredInstances()
+			if m.selectedIndex < len(list)-1 {
 				m.selectedIndex++
 			}
 			if m.confirmPurge {
@@ -198,19 +255,19 @@ func (m *AppModel) purgeInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
 
 func (m *AppModel) viewMain() string {
 	leftWidth := m.width/3 - 2
-	if leftWidth < 35 {
-		leftWidth = 35
+	if leftWidth < 36 {
+		leftWidth = 36
 	}
-	rightWidth := m.width - leftWidth - 6
+	rightWidth := m.width - leftWidth - 5
 	if rightWidth < 45 {
 		rightWidth = 45
 	}
-	contentHeight := m.height - 8
+	contentHeight := m.height - 7
 	if contentHeight < 14 {
 		contentHeight = 14
 	}
-	if contentHeight > 22 {
-		contentHeight = 22
+	if contentHeight > 24 {
+		contentHeight = 24
 	}
 
 	// 1. Top Header Banner with Engine Health Badges and Top Margin
@@ -230,14 +287,14 @@ func (m *AppModel) viewMain() string {
 
 	header := lipgloss.NewStyle().
 		Width(m.width - 2).
-		Background(lipgloss.Color("#1E272E")).
+		Background(BgSurface).
 		Padding(0, 1).
 		MarginTop(1).
 		MarginBottom(1).
 		Render(
 			lipgloss.JoinHorizontal(
 				lipgloss.Center,
-				lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Render("🗄️  LOCAL DATABASE MANAGER"),
+				lipgloss.NewStyle().Bold(true).Foreground(FgText).Render("🗄️  LOCAL DATABASE MANAGER"),
 				lipgloss.NewStyle().Foreground(MutedColor).Render("   │   "),
 				dockerStatusStr,
 				lipgloss.NewStyle().Foreground(MutedColor).Render("   "),
@@ -245,13 +302,30 @@ func (m *AppModel) viewMain() string {
 			),
 		)
 
-	// 2. Left Panel (Instances list)
+	// 2. Left Panel (Instances list with optional search filter)
 	var listItems []string
-	if len(m.instances) == 0 {
-		listItems = append(listItems, NormalItemStyle.Render(" No instances configured."))
-		listItems = append(listItems, NormalItemStyle.Render(" Press 'n' to create one."))
+	filteredList := m.filteredInstances()
+
+	if m.isFiltering {
+		filterBox := lipgloss.NewStyle().
+			Foreground(TealColor).
+			Background(BgDark).
+			Padding(0, 1).
+			Width(leftWidth - 4).
+			Render(fmt.Sprintf("/ %s█", m.filterInput))
+		listItems = append(listItems, filterBox, "")
+	}
+
+	if len(filteredList) == 0 {
+		if m.isFiltering {
+			listItems = append(listItems, lipgloss.NewStyle().Foreground(MutedColor).Render("  No matches found."))
+			listItems = append(listItems, lipgloss.NewStyle().Foreground(MutedColor).Render("  Press [Esc] to reset."))
+		} else {
+			listItems = append(listItems, NormalItemStyle.Render("  No instances configured."))
+			listItems = append(listItems, lipgloss.NewStyle().Foreground(MutedColor).Render("  Press 'n' to create one."))
+		}
 	} else {
-		for i, inst := range m.instances {
+		for i, inst := range filteredList {
 			statusIcon := "🔴"
 			if inst.Status == core.StatusReady {
 				statusIcon = "🟢"
@@ -279,61 +353,66 @@ func (m *AppModel) viewMain() string {
 		}
 	}
 
+	leftTitle := " DB Instances "
+	if m.isFiltering {
+		leftTitle = fmt.Sprintf(" Filter (%d/%d) ", len(filteredList), len(m.instances))
+	}
+
 	leftBox := ActivePanelStyle.
 		Width(leftWidth).
 		Height(contentHeight).
 		Render(
 			lipgloss.JoinVertical(
 				lipgloss.Left,
-				TitleStyle.Render(" DB Instances "),
+				TitleStyle.Render(leftTitle),
 				"",
 				lipgloss.JoinVertical(lipgloss.Left, listItems...),
 			),
 		)
 
-	// 3. Right Panel (Details - Generous 2-column key-value grid with gutter)
+	// 3. Right Panel (Details - Night Owl Styled Grid)
 	var rightContent string
 	inst := m.selectedInstance()
 	if inst == nil {
-		rightContent = NormalItemStyle.Render("Select an instance to view its details.")
+		rightContent = lipgloss.NewStyle().Foreground(MutedColor).Render("Select an instance from the left list to view details.")
 	} else {
-		statusFormatted := StoppedStyle.Render("🔴 STOPPED")
+		statusFormatted := StoppedStyle.Render("○ STOPPED")
 		if inst.Status == core.StatusReady {
-			statusFormatted = RunningStyle.Render("🟢 READY")
+			statusFormatted = RunningStyle.Render("● RUNNING")
 		} else if inst.Status == core.StatusStarting {
-			statusFormatted = StartingStyle.Render("🟡 STARTING")
+			statusFormatted = StartingStyle.Render("◐ STARTING")
 		} else if inst.Status == core.StatusUnknown {
-			statusFormatted = UnknownStyle.Render("🟡 UNKNOWN")
+			statusFormatted = UnknownStyle.Render("? UNKNOWN")
 		}
 
 		engineDesc := fmt.Sprintf("%s (%s)", strings.ToUpper(inst.EngineType), strings.ToUpper(inst.Runtime))
-		memFormatted := fmt.Sprintf("%s (Max: %s)", inst.MemoryUsage, inst.MemoryLimit)
+		memFormatted := fmt.Sprintf("%s (Limit: %s)", inst.MemoryUsage, inst.MemoryLimit)
 
-		colGap := 4
+		colGap := 3
 		availW := rightWidth - 6
 		col1W := (availW - colGap) / 2
-		if col1W < 36 {
-			col1W = 36
+		if col1W < 34 {
+			col1W = 34
 		}
 		col2W := availW - col1W - colGap
-		if col2W < 24 {
-			col2W = 24
+		if col2W < 22 {
+			col2W = 22
 		}
 
 		col1Style := lipgloss.NewStyle().Width(col1W).MarginRight(colGap)
 		col2Style := lipgloss.NewStyle().Width(col2W)
 
 		row1 := lipgloss.JoinHorizontal(lipgloss.Top,
-			col1Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Engine:"), ValueStyle.Render(engineDesc))),
+			col1Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Engine:"), ValueHighlightStyle.Render(engineDesc))),
 			col2Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Container:"), ValueStyle.Render(inst.ContainerName))),
 		)
 		row2 := lipgloss.JoinHorizontal(lipgloss.Top,
 			col1Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Status:"), statusFormatted)),
-			col2Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("RAM (Limit):"), ValueStyle.Render(memFormatted))),
+			col2Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Memory:"), ValueStyle.Render(memFormatted))),
 		)
 		row3 := lipgloss.JoinHorizontal(lipgloss.Top,
 			col1Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Database:"), ValueStyle.Render(inst.Database))),
-			col2Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Host Port:"), ValueStyle.Render(fmt.Sprintf("%d", inst.Port)))),
+			col2Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Port:"), ValueHighlightStyle.Render(fmt.Sprintf("%d", inst.Port)))),
 		)
 		row4 := lipgloss.JoinHorizontal(lipgloss.Top,
 			col1Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("User:"), ValueStyle.Render(inst.User))),
@@ -364,7 +443,7 @@ func (m *AppModel) viewMain() string {
 		Render(
 			lipgloss.JoinVertical(
 				lipgloss.Left,
-				TitleStyle.Render(" Details & Connection "),
+				TitleStyle.Render(" Details & Config "),
 				"",
 				rightContent,
 			),
@@ -384,15 +463,14 @@ func (m *AppModel) viewMain() string {
 	}
 
 	shortcuts := []string{
-		fmt.Sprintf("%s %s", KeyStyle.Render("[↑/↓]"), KeyDescStyle.Render("Navigate")),
-		fmt.Sprintf("%s %s", KeyStyle.Render("[Space]"), KeyDescStyle.Render("Start/Stop")),
-		fmt.Sprintf("%s %s", KeyStyle.Render("[c]"), KeyDescStyle.Render("Copy URI")),
-		fmt.Sprintf("%s %s", KeyStyle.Render("[E]"), KeyDescStyle.Render("Export .env")),
+		fmt.Sprintf("%s %s", KeyStyle.Render("[↑/↓]"), KeyDescStyle.Render("Nav")),
+		fmt.Sprintf("%s %s", KeyStyle.Render("[Enter]"), KeyDescStyle.Render("Actions")),
+		fmt.Sprintf("%s %s", KeyStyle.Render("[/]"), KeyDescStyle.Render("Search")),
+		fmt.Sprintf("%s %s", KeyStyle.Render("[Space]"), KeyDescStyle.Render("Toggle")),
+		fmt.Sprintf("%s %s", KeyStyle.Render("[c]"), KeyDescStyle.Render("URI")),
 		fmt.Sprintf("%s %s", KeyStyle.Render("[l]"), KeyDescStyle.Render("Logs")),
 		fmt.Sprintf("%s %s", KeyStyle.Render("[n]"), KeyDescStyle.Render("New")),
-		fmt.Sprintf("%s %s", KeyStyle.Render("[e]"), KeyDescStyle.Render("Edit .env")),
-		fmt.Sprintf("%s %s", KeyStyle.Render("[d]"), KeyDescStyle.Render("Down -v")),
-		fmt.Sprintf("%s %s", KeyStyle.Render("[r]"), KeyDescStyle.Render("Reload")),
+		fmt.Sprintf("%s %s", KeyStyle.Render("[?]"), KeyDescStyle.Render("Help")),
 		fmt.Sprintf("%s %s", KeyStyle.Render("[q]"), KeyDescStyle.Render("Quit")),
 	}
 	shortcutsBar := strings.Join(shortcuts, "  ")

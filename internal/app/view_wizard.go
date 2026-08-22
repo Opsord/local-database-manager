@@ -295,27 +295,31 @@ func (m *AppModel) viewWizard() string {
 	}
 
 	var content []string
-	content = append(content, TitleStyle.Render(" Wizard: New Database Instance "))
+	content = append(content, TitleStyle.Render(" New Database Instance "))
 	content = append(content, "")
 
 	// 1. Engine
-	engineStr := fmt.Sprintf("1. Database Engine: ")
+	engineStr := fmt.Sprintf("%s ", LabelStyle.Render("1. Engine:"))
 	if w.step == StepEngine {
 		for i, eng := range w.engines {
+			icon := "🐘"
+			if eng == "sqlserver" {
+				icon = "🗄️ "
+			}
 			if i == w.selectedEngineIdx {
-				engineStr += SelectedItemStyle.Render(fmt.Sprintf(" [ %s ] ", eng))
+				engineStr += SelectedItemStyle.Render(fmt.Sprintf(" [ %s %s ] ", icon, eng))
 			} else {
-				engineStr += fmt.Sprintf(" %s ", eng)
+				engineStr += fmt.Sprintf(" %s %s ", icon, eng)
 			}
 		}
 	} else {
-		engineStr += RunningStyle.Render(fmt.Sprintf(" %s", w.engines[w.selectedEngineIdx]))
+		engineStr += ValueHighlightStyle.Render(fmt.Sprintf(" %s", w.engines[w.selectedEngineIdx]))
 	}
 	content = append(content, engineStr)
 
 	// 2. Runtime
 	if w.step >= StepRuntime {
-		runtimeStr := fmt.Sprintf("2. Container Runtime: ")
+		runtimeStr := fmt.Sprintf("%s ", LabelStyle.Render("2. Runtime:"))
 		if w.step == StepRuntime {
 			for i, r := range w.runtimes {
 				if i == w.selectedRuntimeIdx {
@@ -325,46 +329,45 @@ func (m *AppModel) viewWizard() string {
 				}
 			}
 		} else {
-			runtimeStr += RunningStyle.Render(fmt.Sprintf(" %s", w.runtimes[w.selectedRuntimeIdx]))
+			runtimeStr += ValueHighlightStyle.Render(fmt.Sprintf(" %s", w.runtimes[w.selectedRuntimeIdx]))
 		}
 		content = append(content, runtimeStr)
 	}
 
 	// 3. Name
 	if w.step >= StepName {
-		content = append(content, fmt.Sprintf("3. Instance Name: %s", w.inputs[0].View()))
+		content = append(content, fmt.Sprintf("%s %s", LabelStyle.Render("3. Name:"), w.inputs[0].View()))
 	}
 	if w.step >= StepContainerName {
-		content = append(content, fmt.Sprintf("4. Container Name: %s", w.inputs[1].View()))
+		content = append(content, fmt.Sprintf("%s %s", LabelStyle.Render("4. Container:"), w.inputs[1].View()))
 	}
 	if w.step >= StepPort {
-		content = append(content, fmt.Sprintf("5. Host Port (Suggested free): %s", w.inputs[2].View()))
+		content = append(content, fmt.Sprintf("%s %s", LabelStyle.Render("5. Port:"), w.inputs[2].View()))
 	}
 	if w.step >= StepDatabase {
-		content = append(content, fmt.Sprintf("6. Database: %s", w.inputs[3].View()))
+		content = append(content, fmt.Sprintf("%s %s", LabelStyle.Render("6. Database:"), w.inputs[3].View()))
 	}
 	if w.step >= StepVolume {
-		content = append(content, fmt.Sprintf("7. Volume Name: %s", w.inputs[4].View()))
+		content = append(content, fmt.Sprintf("%s %s", LabelStyle.Render("7. Volume:"), w.inputs[4].View()))
 	}
 	if w.step >= StepPassword {
-		content = append(content, fmt.Sprintf("8. Password: %s", w.inputs[5].View()))
+		content = append(content, fmt.Sprintf("%s %s", LabelStyle.Render("8. Password:"), w.inputs[5].View()))
 	}
 	if w.step >= StepMemoryLimit {
 		engine := w.engines[w.selectedEngineIdx]
 		recommendation := "(Recommended: 512M - 1G)"
 		if engine == "sqlserver" {
-			recommendation = "(Recommended: 2G minimum for MSSQL)"
+			recommendation = "(Recommended: 2G min for MSSQL)"
 		}
-		content = append(content, fmt.Sprintf("9. Memory Limit %s: %s", MutedColor, w.inputs[6].View()))
-		content = append(content, KeyDescStyle.Render(fmt.Sprintf("   %s", recommendation)))
+		content = append(content, fmt.Sprintf("%s %s %s", LabelStyle.Render("9. Memory:"), w.inputs[6].View(), lipgloss.NewStyle().Foreground(MutedColor).Render(recommendation)))
 	}
 
 	if w.step == StepReview {
 		content = append(content, "")
-		content = append(content, RunningStyle.Render("✔ All set! Press [Enter] to create the .env file or [Esc] to cancel."))
+		content = append(content, RunningStyle.Render("✔ All set! Press [Enter] to create the instance or [Esc] to cancel."))
 	} else {
 		content = append(content, "")
-		content = append(content, KeyDescStyle.Render("Press [Enter] to advance, [↑/↓] for options, [Esc] to cancel."))
+		content = append(content, lipgloss.NewStyle().Foreground(MutedColor).Render("Press [Enter] to advance, [↑/↓] for options, [Esc] to cancel."))
 	}
 
 	return ActivePanelStyle.

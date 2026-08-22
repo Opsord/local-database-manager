@@ -59,6 +59,8 @@ local-database-manager/
 | Key | Action | Description |
 | :--- | :--- | :--- |
 | `↑` / `↓` or `k` / `j` | Navigate | Move cursor through configured database instances |
+| `Enter` | Action Menu | Open interactive Command Palette for the selected instance |
+| `/` | Live Search | Filter database instances in real-time by name, engine, runtime or port |
 | `Space` | Start / Stop | Toggle container state (`up -d` / `down`) |
 | `c` | Copy URI | Copy full connection URI (`postgresql://...`) to clipboard |
 | `E` / `x` | Export .env | Copy complete backend `.env` block to clipboard |
@@ -67,6 +69,7 @@ local-database-manager/
 | `e` | Edit `.env` | Open instance configuration in your default editor (`code` / `notepad`) |
 | `d` | Down -v (Purge) | Destroy container and persistent data volume (`y/N` prompt) |
 | `r` | Reload | Rescan `instances/` directory and refresh daemon health |
+| `?` | Help | Open shortcuts cheatsheet and driver recommendations |
 | `q` / `Ctrl+C` | Quit | Exit application |
 
 ---
