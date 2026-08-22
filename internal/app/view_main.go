@@ -302,59 +302,75 @@ func (m *AppModel) viewMain() string {
 			),
 		)
 
-	// 2. Left Panel (Instances list with optional search filter)
+	// 2. Left Panel (Instances list OR In-Place Action Menu)
 	var listItems []string
 	filteredList := m.filteredInstances()
+	inst := m.selectedInstance()
 
-	if m.isFiltering {
-		filterBox := lipgloss.NewStyle().
-			Foreground(TealColor).
-			Background(BgDark).
-			Padding(0, 1).
-			Width(leftWidth - 4).
-			Render(fmt.Sprintf("/ %s█", m.filterInput))
-		listItems = append(listItems, filterBox, "")
-	}
-
-	if len(filteredList) == 0 {
-		if m.isFiltering {
-			listItems = append(listItems, lipgloss.NewStyle().Foreground(MutedColor).Render("  No matches found."))
-			listItems = append(listItems, lipgloss.NewStyle().Foreground(MutedColor).Render("  Press [Esc] to reset."))
-		} else {
-			listItems = append(listItems, NormalItemStyle.Render("  No instances configured."))
-			listItems = append(listItems, lipgloss.NewStyle().Foreground(MutedColor).Render("  Press 'n' to create one."))
+	if m.mode == ModeActionMenu && inst != nil {
+		items := m.getActionMenuItems(inst)
+		for i, item := range items {
+			shortcutBadge := lipgloss.NewStyle().Foreground(AccentColor).Render(fmt.Sprintf("[%s]", item.shortcut))
+			itemText := fmt.Sprintf("%-6s %s", shortcutBadge, item.label)
+			if i == m.actionMenuIndex {
+				listItems = append(listItems, SelectedItemStyle.Width(leftWidth-4).Render("> "+itemText))
+			} else {
+				listItems = append(listItems, NormalItemStyle.Render("  "+itemText))
+			}
 		}
 	} else {
-		for i, inst := range filteredList {
-			statusIcon := "🔴"
-			if inst.Status == core.StatusReady {
-				statusIcon = "🟢"
-			} else if inst.Status == core.StatusStarting {
-				statusIcon = "🟡"
-			}
+		if m.isFiltering {
+			filterBox := lipgloss.NewStyle().
+				Foreground(TealColor).
+				Background(BgDark).
+				Padding(0, 1).
+				Width(leftWidth - 4).
+				Render(fmt.Sprintf("/ %s█", m.filterInput))
+			listItems = append(listItems, filterBox, "")
+		}
 
-			runtimeTag := "[Docker]"
-			if inst.Runtime == "podman" {
-				runtimeTag = "[Podman]"
-			}
-
-			engineLabel := "Postgres"
-			if inst.EngineType == "sqlserver" {
-				engineLabel = "SQLServer"
-			}
-
-			line := fmt.Sprintf("%s %-8s %-9s : %s", statusIcon, runtimeTag, engineLabel, inst.Name)
-			if i == m.selectedIndex {
-				line = SelectedItemStyle.Width(leftWidth - 4).Render("> " + line)
+		if len(filteredList) == 0 {
+			if m.isFiltering {
+				listItems = append(listItems, lipgloss.NewStyle().Foreground(MutedColor).Render("  No matches found."))
+				listItems = append(listItems, lipgloss.NewStyle().Foreground(MutedColor).Render("  Press [Esc] to reset."))
 			} else {
-				line = NormalItemStyle.Render("  " + line)
+				listItems = append(listItems, NormalItemStyle.Render("  No instances configured."))
+				listItems = append(listItems, lipgloss.NewStyle().Foreground(MutedColor).Render("  Press 'n' to create one."))
 			}
-			listItems = append(listItems, line)
+		} else {
+			for i, inst := range filteredList {
+				statusIcon := "🔴"
+				if inst.Status == core.StatusReady {
+					statusIcon = "🟢"
+				} else if inst.Status == core.StatusStarting {
+					statusIcon = "🟡"
+				}
+
+				runtimeTag := "[Docker]"
+				if inst.Runtime == "podman" {
+					runtimeTag = "[Podman]"
+				}
+
+				engineLabel := "Postgres"
+				if inst.EngineType == "sqlserver" {
+					engineLabel = "SQLServer"
+				}
+
+				line := fmt.Sprintf("%s %-8s %-9s : %s", statusIcon, runtimeTag, engineLabel, inst.Name)
+				if i == m.selectedIndex {
+					line = SelectedItemStyle.Width(leftWidth - 4).Render("> " + line)
+				} else {
+					line = NormalItemStyle.Render("  " + line)
+				}
+				listItems = append(listItems, line)
+			}
 		}
 	}
 
 	leftTitle := " DB Instances "
-	if m.isFiltering {
+	if m.mode == ModeActionMenu && inst != nil {
+		leftTitle = fmt.Sprintf(" Actions: %s ", inst.Name)
+	} else if m.isFiltering {
 		leftTitle = fmt.Sprintf(" Filter (%d/%d) ", len(filteredList), len(m.instances))
 	}
 
@@ -372,7 +388,6 @@ func (m *AppModel) viewMain() string {
 
 	// 3. Right Panel (Details - Night Owl Styled Grid)
 	var rightContent string
-	inst := m.selectedInstance()
 	if inst == nil {
 		rightContent = lipgloss.NewStyle().Foreground(MutedColor).Render("Select an instance from the left list to view details.")
 	} else {
@@ -462,16 +477,25 @@ func (m *AppModel) viewMain() string {
 		statusLine = lipgloss.NewStyle().Foreground(SecondaryColor).Render(statusLine)
 	}
 
-	shortcuts := []string{
-		fmt.Sprintf("%s %s", KeyStyle.Render("[↑/↓]"), KeyDescStyle.Render("Nav")),
-		fmt.Sprintf("%s %s", KeyStyle.Render("[Enter]"), KeyDescStyle.Render("Actions")),
-		fmt.Sprintf("%s %s", KeyStyle.Render("[/]"), KeyDescStyle.Render("Search")),
-		fmt.Sprintf("%s %s", KeyStyle.Render("[Space]"), KeyDescStyle.Render("Toggle")),
-		fmt.Sprintf("%s %s", KeyStyle.Render("[c]"), KeyDescStyle.Render("URI")),
-		fmt.Sprintf("%s %s", KeyStyle.Render("[l]"), KeyDescStyle.Render("Logs")),
-		fmt.Sprintf("%s %s", KeyStyle.Render("[n]"), KeyDescStyle.Render("New")),
-		fmt.Sprintf("%s %s", KeyStyle.Render("[?]"), KeyDescStyle.Render("Help")),
-		fmt.Sprintf("%s %s", KeyStyle.Render("[q]"), KeyDescStyle.Render("Quit")),
+	var shortcuts []string
+	if m.mode == ModeActionMenu {
+		shortcuts = []string{
+			fmt.Sprintf("%s %s", KeyStyle.Render("[↑/↓]"), KeyDescStyle.Render("Select Action")),
+			fmt.Sprintf("%s %s", KeyStyle.Render("[Enter]"), KeyDescStyle.Render("Execute")),
+			fmt.Sprintf("%s %s", KeyStyle.Render("[Esc]"), KeyDescStyle.Render("Back to List")),
+		}
+	} else {
+		shortcuts = []string{
+			fmt.Sprintf("%s %s", KeyStyle.Render("[↑/↓]"), KeyDescStyle.Render("Nav")),
+			fmt.Sprintf("%s %s", KeyStyle.Render("[Enter]"), KeyDescStyle.Render("Actions")),
+			fmt.Sprintf("%s %s", KeyStyle.Render("[/]"), KeyDescStyle.Render("Search")),
+			fmt.Sprintf("%s %s", KeyStyle.Render("[Space]"), KeyDescStyle.Render("Toggle")),
+			fmt.Sprintf("%s %s", KeyStyle.Render("[c]"), KeyDescStyle.Render("URI")),
+			fmt.Sprintf("%s %s", KeyStyle.Render("[l]"), KeyDescStyle.Render("Logs")),
+			fmt.Sprintf("%s %s", KeyStyle.Render("[n]"), KeyDescStyle.Render("New")),
+			fmt.Sprintf("%s %s", KeyStyle.Render("[?]"), KeyDescStyle.Render("Help")),
+			fmt.Sprintf("%s %s", KeyStyle.Render("[q]"), KeyDescStyle.Render("Quit")),
+		}
 	}
 	shortcutsBar := strings.Join(shortcuts, "  ")
 

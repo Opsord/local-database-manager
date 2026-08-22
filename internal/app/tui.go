@@ -241,11 +241,10 @@ func (m *AppModel) View() string {
 		return m.viewWizard()
 	case ModeLogs:
 		return m.viewLogs()
-	case ModeActionMenu:
-		return m.viewActionMenu()
 	case ModeHelp:
 		return m.viewHelp()
 	default:
+		// ModeMain and ModeActionMenu render the main split screen layout
 		return m.viewMain()
 	}
 }
