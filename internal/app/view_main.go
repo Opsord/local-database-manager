@@ -199,18 +199,18 @@ func (m *AppModel) viewMain() string {
 		leftWidth = 35
 	}
 	rightWidth := m.width - leftWidth - 6
-	if rightWidth < 40 {
-		rightWidth = 40
+	if rightWidth < 45 {
+		rightWidth = 45
 	}
-	contentHeight := m.height - 6
-	if contentHeight < 15 {
-		contentHeight = 15
+	contentHeight := m.height - 8
+	if contentHeight < 14 {
+		contentHeight = 14
 	}
-	if contentHeight > 24 {
-		contentHeight = 24
+	if contentHeight > 22 {
+		contentHeight = 22
 	}
 
-	// 1. Top Header Banner with Engine Health Badges
+	// 1. Top Header Banner with Engine Health Badges and Top Margin
 	dockerStatusStr := StoppedStyle.Render("🔴 Docker: OFFLINE")
 	if m.dockerHealth == core.EngineOnline {
 		dockerStatusStr = RunningStyle.Render("🟢 Docker: ONLINE")
@@ -229,6 +229,8 @@ func (m *AppModel) viewMain() string {
 		Width(m.width - 2).
 		Background(lipgloss.Color("#1E272E")).
 		Padding(0, 1).
+		MarginTop(1).
+		MarginBottom(1).
 		Render(
 			lipgloss.JoinHorizontal(
 				lipgloss.Center,
@@ -286,7 +288,7 @@ func (m *AppModel) viewMain() string {
 			),
 		)
 
-	// 3. Right Panel (Details - Compact 2-column key-value grid)
+	// 3. Right Panel (Details - Generous 2-column key-value grid with gutter)
 	var rightContent string
 	inst := m.selectedInstance()
 	if inst == nil {
@@ -302,33 +304,41 @@ func (m *AppModel) viewMain() string {
 		}
 
 		engineDesc := fmt.Sprintf("%s (%s)", strings.ToUpper(inst.EngineType), strings.ToUpper(inst.Runtime))
-		memFormatted := fmt.Sprintf("%s (Limit: %s)", inst.MemoryUsage, inst.MemoryLimit)
+		memFormatted := fmt.Sprintf("%s (Max: %s)", inst.MemoryUsage, inst.MemoryLimit)
 
-		col1W := 32
-		col2W := rightWidth - col1W - 8
-		if col2W < 20 {
-			col2W = 20
+		colGap := 4
+		availW := rightWidth - 6
+		col1W := (availW - colGap) / 2
+		if col1W < 36 {
+			col1W = 36
+		}
+		col2W := availW - col1W - colGap
+		if col2W < 24 {
+			col2W = 24
 		}
 
+		col1Style := lipgloss.NewStyle().Width(col1W).MarginRight(colGap)
+		col2Style := lipgloss.NewStyle().Width(col2W)
+
 		row1 := lipgloss.JoinHorizontal(lipgloss.Top,
-			lipgloss.NewStyle().Width(col1W).Render(fmt.Sprintf("%s %s", LabelStyle.Render("Engine:"), ValueStyle.Render(engineDesc))),
-			lipgloss.NewStyle().Width(col2W).Render(fmt.Sprintf("%s %s", LabelStyle.Render("Container:"), ValueStyle.Render(inst.ContainerName))),
+			col1Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Engine:"), ValueStyle.Render(engineDesc))),
+			col2Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Container:"), ValueStyle.Render(inst.ContainerName))),
 		)
 		row2 := lipgloss.JoinHorizontal(lipgloss.Top,
-			lipgloss.NewStyle().Width(col1W).Render(fmt.Sprintf("%s %s", LabelStyle.Render("Status:"), statusFormatted)),
-			lipgloss.NewStyle().Width(col2W).Render(fmt.Sprintf("%s %s", LabelStyle.Render("RAM (Limit):"), ValueStyle.Render(memFormatted))),
+			col1Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Status:"), statusFormatted)),
+			col2Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("RAM (Limit):"), ValueStyle.Render(memFormatted))),
 		)
 		row3 := lipgloss.JoinHorizontal(lipgloss.Top,
-			lipgloss.NewStyle().Width(col1W).Render(fmt.Sprintf("%s %s", LabelStyle.Render("Database:"), ValueStyle.Render(inst.Database))),
-			lipgloss.NewStyle().Width(col2W).Render(fmt.Sprintf("%s %s", LabelStyle.Render("Host Port:"), ValueStyle.Render(fmt.Sprintf("%d", inst.Port)))),
+			col1Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Database:"), ValueStyle.Render(inst.Database))),
+			col2Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Host Port:"), ValueStyle.Render(fmt.Sprintf("%d", inst.Port)))),
 		)
 		row4 := lipgloss.JoinHorizontal(lipgloss.Top,
-			lipgloss.NewStyle().Width(col1W).Render(fmt.Sprintf("%s %s", LabelStyle.Render("User:"), ValueStyle.Render(inst.User))),
-			lipgloss.NewStyle().Width(col2W).Render(fmt.Sprintf("%s %s", LabelStyle.Render("Schema:"), ValueStyle.Render(inst.Schema))),
+			col1Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("User:"), ValueStyle.Render(inst.User))),
+			col2Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Schema:"), ValueStyle.Render(inst.Schema))),
 		)
 		row5 := lipgloss.JoinHorizontal(lipgloss.Top,
-			lipgloss.NewStyle().Width(col1W).Render(fmt.Sprintf("%s %s", LabelStyle.Render("Volume:"), ValueStyle.Render(inst.Volume))),
-			lipgloss.NewStyle().Width(col2W).Render(fmt.Sprintf("%s %s", LabelStyle.Render("Project:"), ValueStyle.Render(inst.ProjectName))),
+			col1Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Volume:"), ValueStyle.Render(inst.Volume))),
+			col2Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Project:"), ValueStyle.Render(inst.ProjectName))),
 		)
 
 		details := []string{
@@ -339,6 +349,7 @@ func (m *AppModel) viewMain() string {
 			row5,
 			"",
 			fmt.Sprintf("%s %s", LabelStyle.Render("URI:"), URIBoxStyle.Width(rightWidth-18).Render(inst.ConnectionURI())),
+			"",
 			fmt.Sprintf("%s %s", LabelStyle.Render("CLI:"), CLIBoxStyle.Width(rightWidth-18).Render(inst.CLICommand())),
 		}
 		rightContent = lipgloss.JoinVertical(lipgloss.Left, details...)
