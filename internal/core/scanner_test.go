@@ -7,6 +7,8 @@ import (
 )
 
 func TestScanInstances(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 
 	env1 := filepath.Join(tmpDir, "super_calendar.env")

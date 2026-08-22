@@ -6,6 +6,8 @@ import (
 )
 
 func TestIsPortAvailable(t *testing.T) {
+	t.Parallel()
+
 	// Dynamically bind to a port to make it occupied
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -21,6 +23,8 @@ func TestIsPortAvailable(t *testing.T) {
 }
 
 func TestFindNextFreePort(t *testing.T) {
+	t.Parallel()
+
 	existing := []*DatabaseInstance{
 		{Port: 5432},
 		{Port: 5433},
