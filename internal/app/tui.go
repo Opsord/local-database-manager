@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -29,7 +30,7 @@ type actionDoneMsg struct {
 type AppModel struct {
 	projectRoot  string
 	instancesDir string
-	runner       *core.Runner
+	runner       core.InstanceRunner
 
 	mode          AppMode
 	instances     []*core.DatabaseInstance
@@ -73,8 +74,9 @@ func (m *AppModel) Init() tea.Cmd {
 
 func (m *AppModel) reloadInstancesCmd() tea.Cmd {
 	return func() tea.Msg {
-		dockerHealth := m.runner.CheckEngineHealth("docker")
-		podmanHealth := m.runner.CheckEngineHealth("podman")
+		ctx := context.Background()
+		dockerHealth := m.runner.CheckEngineHealth(ctx, "docker")
+		podmanHealth := m.runner.CheckEngineHealth(ctx, "podman")
 
 		instances, err := core.ScanInstances(m.instancesDir)
 		if err != nil {
@@ -83,9 +85,9 @@ func (m *AppModel) reloadInstancesCmd() tea.Cmd {
 
 		// Inspect current status and stats of all instances
 		for _, inst := range instances {
-			inst.Status = m.runner.CheckStatus(inst)
+			inst.Status = m.runner.CheckStatus(ctx, inst)
 			if inst.Status != core.StatusStopped {
-				inst.MemoryUsage = m.runner.GetMemoryUsage(inst)
+				inst.MemoryUsage = m.runner.GetMemoryUsage(ctx, inst)
 			} else {
 				inst.MemoryUsage = "-"
 			}

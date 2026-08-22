@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -151,14 +152,15 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *AppModel) toggleInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
 	return func() tea.Msg {
+		ctx := context.Background()
 		var err error
 		var actionName string
 		if inst.Status == core.StatusReady || inst.Status == core.StatusStarting {
 			actionName = "stopped"
-			err = m.runner.Stop(inst)
+			err = m.runner.Stop(ctx, inst)
 		} else {
 			actionName = "started"
-			err = m.runner.Start(inst)
+			err = m.runner.Start(ctx, inst)
 		}
 
 		if err != nil {
@@ -166,9 +168,9 @@ func (m *AppModel) toggleInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
 		}
 
 		// Update state
-		inst.Status = m.runner.CheckStatus(inst)
+		inst.Status = m.runner.CheckStatus(ctx, inst)
 		if inst.Status != core.StatusStopped {
-			inst.MemoryUsage = m.runner.GetMemoryUsage(inst)
+			inst.MemoryUsage = m.runner.GetMemoryUsage(ctx, inst)
 		} else {
 			inst.MemoryUsage = "-"
 		}
@@ -181,11 +183,12 @@ func (m *AppModel) toggleInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
 
 func (m *AppModel) purgeInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
 	return func() tea.Msg {
-		err := m.runner.DownVolumes(inst)
+		ctx := context.Background()
+		err := m.runner.DownVolumes(ctx, inst)
 		if err != nil {
 			return errMsg{err}
 		}
-		inst.Status = m.runner.CheckStatus(inst)
+		inst.Status = m.runner.CheckStatus(ctx, inst)
 		inst.MemoryUsage = "-"
 		return actionDoneMsg{
 			msg: fmt.Sprintf("✔ Container and volume for '%s' purged successfully!", inst.Name),

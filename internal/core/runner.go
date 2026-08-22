@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net"
 	"os/exec"
@@ -19,6 +20,17 @@ const (
 	EngineNotInstalled EngineHealth = "NOT_INSTALLED"
 )
 
+// InstanceRunner defines the interface for database lifecycle operations.
+type InstanceRunner interface {
+	CheckEngineHealth(ctx context.Context, runtimeName string) EngineHealth
+	Start(ctx context.Context, inst *DatabaseInstance) error
+	Stop(ctx context.Context, inst *DatabaseInstance) error
+	DownVolumes(ctx context.Context, inst *DatabaseInstance) error
+	CheckStatus(ctx context.Context, inst *DatabaseInstance) ContainerStatus
+	GetMemoryUsage(ctx context.Context, inst *DatabaseInstance) string
+	LogsCommand(inst *DatabaseInstance) *exec.Cmd
+}
+
 // Runner manages starting, stopping, and inspecting database containers.
 type Runner struct {
 	ProjectRoot string
@@ -30,17 +42,20 @@ func NewRunner(projectRoot string) *Runner {
 }
 
 // CheckEngineHealth checks if the container runtime daemon (Docker or Podman) is active.
-func (r *Runner) CheckEngineHealth(runtimeName string) EngineHealth {
-	bin := "docker"
-	if runtimeName == "podman" {
-		bin = "podman"
+func (r *Runner) CheckEngineHealth(ctx context.Context, runtimeName string) EngineHealth {
+	bin := runtimeName
+	if bin == "" {
+		bin = "docker"
 	}
 
 	if _, err := exec.LookPath(bin); err != nil {
 		return EngineNotInstalled
 	}
 
-	cmd := exec.Command(bin, "info")
+	cmdCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(cmdCtx, bin, "info")
 	if err := cmd.Run(); err != nil {
 		return EngineOffline
 	}
@@ -55,8 +70,7 @@ func (r *Runner) GetComposeFile(inst *DatabaseInstance) string {
 	}
 
 	if inst.Runtime == "podman" {
-		podmanFile := filepath.Join(r.ProjectRoot, "engines", engineFolder, "podman-compose.yml")
-		return podmanFile
+		return filepath.Join(r.ProjectRoot, "engines", engineFolder, "podman-compose.yml")
 	}
 
 	return filepath.Join(r.ProjectRoot, "engines", engineFolder, "docker-compose.yml")
@@ -64,9 +78,9 @@ func (r *Runner) GetComposeFile(inst *DatabaseInstance) string {
 
 // BuildComposeArgs returns the binary name and base command arguments.
 func (r *Runner) BuildComposeArgs(inst *DatabaseInstance, extraArgs ...string) (string, []string) {
-	binary := "docker"
-	if inst.Runtime == "podman" {
-		binary = "podman"
+	binary := inst.Runtime
+	if binary == "" {
+		binary = "docker"
 	}
 
 	composeFile := r.GetComposeFile(inst)
@@ -87,20 +101,20 @@ func (r *Runner) BuildComposeArgs(inst *DatabaseInstance, extraArgs ...string) (
 }
 
 // Start launches the container in detached mode (up -d).
-func (r *Runner) Start(inst *DatabaseInstance) error {
-	health := r.CheckEngineHealth(inst.Runtime)
+func (r *Runner) Start(ctx context.Context, inst *DatabaseInstance) error {
+	health := r.CheckEngineHealth(ctx, inst.Runtime)
 	if health == EngineNotInstalled {
-		return fmt.Errorf("%s is not installed or not found in PATH", inst.Runtime)
+		return fmt.Errorf("%w: %s", ErrEngineNotInstalled, inst.Runtime)
 	}
 	if health == EngineOffline {
-		if inst.Runtime == "podman" {
-			return fmt.Errorf("Podman service is not running (run 'podman machine start')")
-		}
-		return fmt.Errorf("Docker engine is not running (start Docker Desktop or the docker service)")
+		return fmt.Errorf("%w: %s daemon is not running", ErrEngineOffline, inst.Runtime)
 	}
 
+	cmdCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+
 	bin, args := r.BuildComposeArgs(inst, "up", "-d")
-	cmd := exec.Command(bin, args...)
+	cmd := exec.CommandContext(cmdCtx, bin, args...)
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 
@@ -112,9 +126,12 @@ func (r *Runner) Start(inst *DatabaseInstance) error {
 }
 
 // Stop halts the container (down).
-func (r *Runner) Stop(inst *DatabaseInstance) error {
+func (r *Runner) Stop(ctx context.Context, inst *DatabaseInstance) error {
+	cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
 	bin, args := r.BuildComposeArgs(inst, "down")
-	cmd := exec.Command(bin, args...)
+	cmd := exec.CommandContext(cmdCtx, bin, args...)
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 
@@ -127,9 +144,12 @@ func (r *Runner) Stop(inst *DatabaseInstance) error {
 }
 
 // DownVolumes stops and deletes container volumes (down -v).
-func (r *Runner) DownVolumes(inst *DatabaseInstance) error {
+func (r *Runner) DownVolumes(ctx context.Context, inst *DatabaseInstance) error {
+	cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
 	bin, args := r.BuildComposeArgs(inst, "down", "-v")
-	cmd := exec.Command(bin, args...)
+	cmd := exec.CommandContext(cmdCtx, bin, args...)
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 
@@ -142,9 +162,12 @@ func (r *Runner) DownVolumes(inst *DatabaseInstance) error {
 }
 
 // CheckStatus checks if the container is running and whether the DB port is ready to accept connections.
-func (r *Runner) CheckStatus(inst *DatabaseInstance) ContainerStatus {
+func (r *Runner) CheckStatus(ctx context.Context, inst *DatabaseInstance) ContainerStatus {
+	cmdCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
 	bin, args := r.BuildComposeArgs(inst, "ps", "--format", "{{.State}}")
-	cmd := exec.Command(bin, args...)
+	cmd := exec.CommandContext(cmdCtx, bin, args...)
 	var outBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 
@@ -172,7 +195,7 @@ func isTCPPortReady(port int) bool {
 }
 
 // GetMemoryUsage retrieves memory consumption stats for the container.
-func (r *Runner) GetMemoryUsage(inst *DatabaseInstance) string {
+func (r *Runner) GetMemoryUsage(ctx context.Context, inst *DatabaseInstance) string {
 	if inst.Status == StatusStopped {
 		return "-"
 	}
@@ -182,7 +205,10 @@ func (r *Runner) GetMemoryUsage(inst *DatabaseInstance) string {
 		bin = "podman"
 	}
 
-	cmd := exec.Command(bin, "stats", "--no-stream", "--format", "{{.MemUsage}}", inst.ContainerName)
+	cmdCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(cmdCtx, bin, "stats", "--no-stream", "--format", "{{.MemUsage}}", inst.ContainerName)
 	var outBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 

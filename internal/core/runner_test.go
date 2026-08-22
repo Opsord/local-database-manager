@@ -1,12 +1,19 @@
 package core
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
+// Verify at compile-time that Runner implements InstanceRunner
+var _ InstanceRunner = (*Runner)(nil)
+
 func TestRunner_BuildComposeArgs(t *testing.T) {
+	t.Parallel()
 	root := "/test/app"
 	runner := NewRunner(root)
 
@@ -42,6 +49,7 @@ func TestRunner_BuildComposeArgs(t *testing.T) {
 }
 
 func TestRunner_PodmanCompose(t *testing.T) {
+	t.Parallel()
 	root := "/test/app"
 	runner := NewRunner(root)
 
@@ -63,5 +71,28 @@ func TestRunner_PodmanCompose(t *testing.T) {
 	expectedComposeFile := filepath.Join(root, "engines", "postgres", "podman-compose.yml")
 	if !strings.Contains(joined, expectedComposeFile) {
 		t.Errorf("expected compose file '%s', got '%s'", expectedComposeFile, joined)
+	}
+}
+
+func TestRunner_Start_OfflineError(t *testing.T) {
+	t.Parallel()
+	runner := NewRunner("/test/app")
+	inst := &DatabaseInstance{
+		Name:        "offline_test",
+		EngineType:  "postgres",
+		Runtime:     "nonexistent_runtime_binary_xyz",
+		EnvFilePath: "dummy.env",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err := runner.Start(ctx, inst)
+	if err == nil {
+		t.Fatal("expected error for nonexistent runtime, got nil")
+	}
+
+	if !errors.Is(err, ErrEngineNotInstalled) {
+		t.Errorf("expected error to wrap ErrEngineNotInstalled, got %v", err)
 	}
 }
