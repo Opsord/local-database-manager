@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"local-database-manager/internal/core"
@@ -50,7 +51,7 @@ func (m *AppModel) getActionMenuItems(inst *core.DatabaseInstance) []actionMenuI
 					m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
 					m.statusIsErr = true
 				} else {
-					m.statusMsg = fmt.Sprintf("✔ URI for '%s' copied to clipboard!", inst.Name)
+					m.statusMsg = fmt.Sprintf("URI for '%s' copied to clipboard!", inst.Name)
 					m.statusIsErr = false
 				}
 				return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
@@ -67,7 +68,7 @@ func (m *AppModel) getActionMenuItems(inst *core.DatabaseInstance) []actionMenuI
 					m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
 					m.statusIsErr = true
 				} else {
-					m.statusMsg = fmt.Sprintf("✔ Backend .env block for '%s' copied to clipboard!", inst.Name)
+					m.statusMsg = fmt.Sprintf("Backend .env block for '%s' copied to clipboard!", inst.Name)
 					m.statusIsErr = false
 				}
 				return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
@@ -158,8 +159,7 @@ func (m *AppModel) updateActionMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *AppModel) viewActionMenu() string {
 	inst := m.selectedInstance()
 	if inst == nil {
-		m.mode = ModeMain
-		return m.viewMain()
+		return ""
 	}
 
 	items := m.getActionMenuItems(inst)
@@ -172,17 +172,17 @@ func (m *AppModel) viewActionMenu() string {
 	}
 
 	var content []string
-	content = append(content, TitleStyle.Render(fmt.Sprintf(" Actions: %s (%s) ", inst.Name, inst.EngineType)))
-	content = append(content, "")
+	content = append(content, TitleStyle.Render(fmt.Sprintf("Actions: %s (%s)", inst.Name, inst.EngineType)))
+	content = append(content, SeparatorStyle.Render(strings.Repeat("─", modalWidth-4)))
+	content = append(content, surfaceGap(1))
 
 	for i, item := range items {
+		shortcutBadge := lipgloss.NewStyle().Foreground(AccentColor).Background(BgSurface).Render(fmt.Sprintf("[%s]", item.shortcut))
+		labelStr := lipgloss.NewStyle().Bold(true).Foreground(FgText).Background(BgSurface).Render(item.label)
+		descStr := MutedStyle.Render(" — " + item.description)
+		itemText := fmt.Sprintf("%s  %s  %s", labelStr, shortcutBadge, descStr)
+
 		var line string
-		shortcutBadge := lipgloss.NewStyle().Foreground(AccentColor).Render(fmt.Sprintf("[%s]", item.shortcut))
-		labelStr := lipgloss.NewStyle().Bold(true).Render(item.label)
-		descStr := lipgloss.NewStyle().Foreground(MutedColor).Render(" — " + item.description)
-
-		itemText := fmt.Sprintf("%-24s %-6s %s", labelStr, shortcutBadge, descStr)
-
 		if i == m.actionMenuIndex {
 			line = SelectedItemStyle.Width(modalWidth - 4).Render("> " + itemText)
 		} else {
@@ -191,14 +191,12 @@ func (m *AppModel) viewActionMenu() string {
 		content = append(content, line)
 	}
 
-	content = append(content, "")
-	content = append(content, lipgloss.NewStyle().Foreground(MutedColor).Render("Use [↑/↓] to navigate, [Enter] to execute, [Esc] to return."))
+	content = append(content, surfaceGap(1))
+	content = append(content, MutedStyle.Render("Use [↑/↓] to navigate, [Enter] to execute, [Esc] to return."))
 
-	modalBox := ActivePanelStyle.
+	return ActivePanelStyle.
 		Width(modalWidth).
 		Render(lipgloss.JoinVertical(lipgloss.Left, content...))
-
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalBox)
 }
 
 func (m *AppModel) updateHelp(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -223,8 +221,9 @@ func (m *AppModel) viewHelp() string {
 	}
 
 	var content []string
-	content = append(content, TitleStyle.Render(" Keyboard Shortcuts & Guide "))
-	content = append(content, "")
+	content = append(content, TitleStyle.Render("Keyboard Shortcuts & Guide"))
+	content = append(content, SeparatorStyle.Render(strings.Repeat("─", modalWidth-4)))
+	content = append(content, surfaceGap(1))
 
 	helpItems := [][]string{
 		{"[↑ / ↓] / [k / j]", "Navigate through database instances"},
@@ -243,21 +242,19 @@ func (m *AppModel) viewHelp() string {
 	}
 
 	for _, item := range helpItems {
-		keyStr := lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true).Width(20).Render(item[0])
-		descStr := lipgloss.NewStyle().Foreground(FgText).Render(item[1])
-		content = append(content, fmt.Sprintf("  %s %s", keyStr, descStr))
+		keyStr := lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true).Width(20).Background(BgSurface).Render(item[0])
+		descStr := lipgloss.NewStyle().Foreground(FgText).Background(BgSurface).Render(item[1])
+		content = append(content, lipgloss.JoinHorizontal(lipgloss.Top, surfaceGap(2), keyStr, surfaceGap(1), descStr))
 	}
 
-	content = append(content, "")
-	content = append(content, SubTitleStyle.Render(" Database Drivers & Tools:"))
-	content = append(content, lipgloss.NewStyle().Foreground(MutedColor).Render("  • Postgres: psql, pgAdmin, DBeaver, Prisma, TypeORM, GORM"))
-	content = append(content, lipgloss.NewStyle().Foreground(MutedColor).Render("  • SQL Server: sqlcmd, SSMS, Azure Data Studio, EF Core"))
-	content = append(content, "")
-	content = append(content, lipgloss.NewStyle().Foreground(MutedColor).Render("Press [Esc], [?], or [Enter] to return."))
+	content = append(content, surfaceGap(1))
+	content = append(content, SubTitleStyle.Render("Database Drivers & Tools:"))
+	content = append(content, MutedStyle.Render("  • Postgres: psql, pgAdmin, DBeaver, Prisma, TypeORM, GORM"))
+	content = append(content, MutedStyle.Render("  • SQL Server: sqlcmd, SSMS, Azure Data Studio, EF Core"))
+	content = append(content, surfaceGap(1))
+	content = append(content, MutedStyle.Render("Press [Esc], [?], or [Enter] to return."))
 
-	modalBox := ActivePanelStyle.
+	return ActivePanelStyle.
 		Width(modalWidth).
 		Render(lipgloss.JoinVertical(lipgloss.Left, content...))
-
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalBox)
 }

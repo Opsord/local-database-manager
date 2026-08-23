@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type AppMode int
@@ -233,18 +234,23 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders the current active UI screen.
 func (m *AppModel) View() string {
 	if m.width == 0 {
-		return "Initializing..."
+		return lipgloss.NewStyle().Background(BgDark).Foreground(FgText).Render("Initializing...")
 	}
 
 	switch m.mode {
 	case ModeWizard:
-		return m.viewWizard()
+		return m.wrapScreen(m.renderOverlay(m.viewWizard()))
 	case ModeLogs:
-		return m.viewLogs()
+		return m.wrapScreen(m.viewLogs())
 	case ModeHelp:
-		return m.viewHelp()
+		return m.wrapScreen(m.renderOverlay(m.viewHelp()))
+	case ModeActionMenu:
+		modal := m.viewActionMenu()
+		if modal == "" {
+			return m.wrapScreen(m.viewMain())
+		}
+		return m.wrapScreen(m.renderOverlay(modal))
 	default:
-		// ModeMain and ModeActionMenu render the main split screen layout
-		return m.viewMain()
+		return m.wrapScreen(m.viewMain())
 	}
 }

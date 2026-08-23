@@ -106,24 +106,39 @@ func (m *AppModel) updateLogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *AppModel) viewLogs() string {
-	header := TitleStyle.Render(fmt.Sprintf(" Logs: %s ", m.logs.instName))
-	footer := StatusBarStyle.Width(m.width - 4).Render(
+	panelWidth := m.width - 4
+	if panelWidth < 40 {
+		panelWidth = 40
+	}
+	logHeight := m.height - 8
+	if logHeight < 10 {
+		logHeight = 10
+	}
+
+	header := TitleStyle.Render(fmt.Sprintf("Logs: %s", m.logs.instName))
+	separator := SeparatorStyle.Render(strings.Repeat("─", panelWidth-4))
+
+	logContent := LogAreaStyle.
+		Width(panelWidth - 4).
+		Height(logHeight).
+		Render(m.logs.viewport.View())
+
+	footer := StatusBarStyle.Width(panelWidth - 2).Render(
 		fmt.Sprintf(" %s %s",
-			lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true).Render("[Esc/q] Return"),
-			lipgloss.NewStyle().Foreground(FgText).Render("  │  [↑/↓] or [PgUp/PgDn] Scroll"),
+			lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true).Background(BgSurface).Render("[Esc/q] Return"),
+			lipgloss.NewStyle().Foreground(FgText).Background(BgSurface).Render("  |  [↑/↓] or [PgUp/PgDn] Scroll"),
 		),
 	)
 
 	return ActivePanelStyle.
-		Width(m.width - 4).
+		Width(panelWidth).
 		Height(m.height - 2).
 		Render(
 			lipgloss.JoinVertical(
 				lipgloss.Left,
 				header,
-				"",
-				m.logs.viewport.View(),
-				"",
+				separator,
+				logContent,
 				footer,
 			),
 		)

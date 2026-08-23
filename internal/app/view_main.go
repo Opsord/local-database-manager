@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"local-database-manager/internal/core"
@@ -15,7 +14,6 @@ import (
 func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		// If in live search/filtering mode
 		if m.isFiltering {
 			switch msg.String() {
 			case "esc":
@@ -44,7 +42,6 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			default:
-				// Filter printable runes
 				if len(msg.String()) == 1 && msg.Runes != nil && len(msg.Runes) > 0 {
 					m.filterInput += msg.String()
 					m.selectedIndex = 0
@@ -120,7 +117,7 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
 				m.statusIsErr = true
 			} else {
-				m.statusMsg = fmt.Sprintf("✔ URI for '%s' copied to clipboard!", inst.Name)
+				m.statusMsg = fmt.Sprintf("URI for '%s' copied to clipboard!", inst.Name)
 				m.statusIsErr = false
 			}
 			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
@@ -135,7 +132,7 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
 				m.statusIsErr = true
 			} else {
-				m.statusMsg = fmt.Sprintf("✔ Backend .env block for '%s' copied to clipboard!", inst.Name)
+				m.statusMsg = fmt.Sprintf("Backend .env block for '%s' copied to clipboard!", inst.Name)
 				m.statusIsErr = false
 			}
 			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
@@ -184,7 +181,6 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusIsErr = false
 				return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
 			}
-			// Open Wizard
 			m.mode = ModeWizard
 			m.wizard = newWizardModel(m.projectRoot, m.instancesDir, m.instances)
 			return m, nil
@@ -224,7 +220,6 @@ func (m *AppModel) toggleInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
 			return errMsg{err}
 		}
 
-		// Update state
 		inst.Status = m.runner.CheckStatus(ctx, inst)
 		if inst.Status != core.StatusStopped {
 			inst.MemoryUsage = m.runner.GetMemoryUsage(ctx, inst)
@@ -233,7 +228,7 @@ func (m *AppModel) toggleInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
 		}
 
 		return actionDoneMsg{
-			msg: fmt.Sprintf("✔ Instance '%s' %s successfully!", inst.Name, actionName),
+			msg: fmt.Sprintf("Instance '%s' %s successfully!", inst.Name, actionName),
 		}
 	}
 }
@@ -248,7 +243,7 @@ func (m *AppModel) purgeInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
 		inst.Status = m.runner.CheckStatus(ctx, inst)
 		inst.MemoryUsage = "-"
 		return actionDoneMsg{
-			msg: fmt.Sprintf("✔ Container and volume for '%s' purged successfully!", inst.Name),
+			msg: fmt.Sprintf("Container and volume for '%s' purged successfully!", inst.Name),
 		}
 	}
 }
@@ -262,116 +257,66 @@ func (m *AppModel) viewMain() string {
 	if rightWidth < 45 {
 		rightWidth = 45
 	}
-	contentHeight := m.height - 7
-	if contentHeight < 14 {
-		contentHeight = 14
-	}
-	if contentHeight > 24 {
-		contentHeight = 24
-	}
+	contentHeight := mainContentHeight(m.height)
 
-	// 1. Top Header Banner with Engine Health Badges and Top Margin
-	dockerStatusStr := StoppedStyle.Render("🔴 Docker: OFFLINE")
-	if m.dockerHealth == core.EngineOnline {
-		dockerStatusStr = RunningStyle.Render("🟢 Docker: ONLINE")
-	} else if m.dockerHealth == core.EngineNotInstalled {
-		dockerStatusStr = UnknownStyle.Render("⚪ Docker: NOT INSTALLED")
-	}
+	dockerBadge := engineBadge("Docker", m.dockerHealth)
+	podmanBadge := engineBadge("Podman", m.podmanHealth)
 
-	podmanStatusStr := StoppedStyle.Render("🔴 Podman: OFFLINE")
-	if m.podmanHealth == core.EngineOnline {
-		podmanStatusStr = RunningStyle.Render("🟢 Podman: ONLINE")
-	} else if m.podmanHealth == core.EngineNotInstalled {
-		podmanStatusStr = UnknownStyle.Render("⚪ Podman: NOT INSTALLED")
-	}
-
-	header := lipgloss.NewStyle().
+	header := HeaderStyle.
 		Width(m.width - 2).
-		Background(BgSurface).
-		Padding(0, 1).
-		MarginTop(1).
-		MarginBottom(1).
 		Render(
 			lipgloss.JoinHorizontal(
-				lipgloss.Center,
-				lipgloss.NewStyle().Bold(true).Foreground(FgText).Render("🗄️  LOCAL DATABASE MANAGER"),
-				lipgloss.NewStyle().Foreground(MutedColor).Render("   │   "),
-				dockerStatusStr,
-				lipgloss.NewStyle().Foreground(MutedColor).Render("   "),
-				podmanStatusStr,
+				lipgloss.Top,
+				lipgloss.NewStyle().Bold(true).Foreground(FgText).Background(HeaderBg).Render("LOCAL DATABASE MANAGER"),
+				lipgloss.NewStyle().Foreground(MutedColor).Background(HeaderBg).Render("  |  "),
+				dockerBadge,
+				lipgloss.NewStyle().Foreground(MutedColor).Background(HeaderBg).Render(" "),
+				podmanBadge,
 			),
 		)
 
-	// 2. Left Panel (Instances list OR In-Place Action Menu)
+	leftInner := panelInnerWidth(leftWidth)
+	rightInner := panelInnerWidth(rightWidth)
+
 	var listItems []string
 	filteredList := m.filteredInstances()
 	inst := m.selectedInstance()
 
-	if m.mode == ModeActionMenu && inst != nil {
-		items := m.getActionMenuItems(inst)
-		for i, item := range items {
-			shortcutBadge := lipgloss.NewStyle().Foreground(AccentColor).Render(fmt.Sprintf("[%s]", item.shortcut))
-			itemText := fmt.Sprintf("%-6s %s", shortcutBadge, item.label)
-			if i == m.actionMenuIndex {
-				listItems = append(listItems, SelectedItemStyle.Width(leftWidth-4).Render("> "+itemText))
-			} else {
-				listItems = append(listItems, NormalItemStyle.Render("  "+itemText))
-			}
+	if m.isFiltering {
+		filterBox := FilterBoxStyle.
+			Width(leftInner).
+			Render(fmt.Sprintf("/ %s|", m.filterInput))
+		listItems = append(listItems, filterBox, surfaceBlankLine(leftInner))
+	}
+
+	if len(filteredList) == 0 {
+		if m.isFiltering {
+			listItems = append(listItems, surfaceLine(leftInner, MutedStyle.Render("  No matches found.")))
+			listItems = append(listItems, surfaceLine(leftInner, MutedStyle.Render("  Press [Esc] to reset.")))
+		} else {
+			listItems = append(listItems, surfaceLine(leftInner, NormalItemStyle.Render("  No instances configured.")))
+			listItems = append(listItems, surfaceLine(leftInner, MutedStyle.Render("  Press 'n' to create one.")))
 		}
 	} else {
-		if m.isFiltering {
-			filterBox := lipgloss.NewStyle().
-				Foreground(TealColor).
-				Background(BgDark).
-				Padding(0, 1).
-				Width(leftWidth - 4).
-				Render(fmt.Sprintf("/ %s█", m.filterInput))
-			listItems = append(listItems, filterBox, "")
-		}
-
-		if len(filteredList) == 0 {
-			if m.isFiltering {
-				listItems = append(listItems, lipgloss.NewStyle().Foreground(MutedColor).Render("  No matches found."))
-				listItems = append(listItems, lipgloss.NewStyle().Foreground(MutedColor).Render("  Press [Esc] to reset."))
-			} else {
-				listItems = append(listItems, NormalItemStyle.Render("  No instances configured."))
-				listItems = append(listItems, lipgloss.NewStyle().Foreground(MutedColor).Render("  Press 'n' to create one."))
+		for i, item := range filteredList {
+			runtimeTag := "Docker"
+			if item.Runtime == "podman" {
+				runtimeTag = "Podman"
 			}
-		} else {
-			for i, inst := range filteredList {
-				statusIcon := "🔴"
-				if inst.Status == core.StatusReady {
-					statusIcon = "🟢"
-				} else if inst.Status == core.StatusStarting {
-					statusIcon = "🟡"
-				}
 
-				runtimeTag := "[Docker]"
-				if inst.Runtime == "podman" {
-					runtimeTag = "[Podman]"
-				}
-
-				engineLabel := "Postgres"
-				if inst.EngineType == "sqlserver" {
-					engineLabel = "SQLServer"
-				}
-
-				line := fmt.Sprintf("%s %-8s %-9s : %s", statusIcon, runtimeTag, engineLabel, inst.Name)
-				if i == m.selectedIndex {
-					line = SelectedItemStyle.Width(leftWidth - 4).Render("> " + line)
-				} else {
-					line = NormalItemStyle.Render("  " + line)
-				}
-				listItems = append(listItems, line)
+			engineLabel := "Postgres"
+			if item.EngineType == "sqlserver" {
+				engineLabel = "SQLServer"
 			}
+
+			line := renderListLine(item.Status, runtimeTag, engineLabel, item.Name, leftInner, i == m.selectedIndex)
+			listItems = append(listItems, line)
 		}
 	}
 
-	leftTitle := " DB Instances "
-	if m.mode == ModeActionMenu && inst != nil {
-		leftTitle = fmt.Sprintf(" Actions: %s ", inst.Name)
-	} else if m.isFiltering {
-		leftTitle = fmt.Sprintf(" Filter (%d/%d) ", len(filteredList), len(m.instances))
+	leftTitle := "DB Instances"
+	if m.isFiltering {
+		leftTitle = fmt.Sprintf("Filter (%d/%d)", len(filteredList), len(m.instances))
 	}
 
 	leftBox := ActivePanelStyle.
@@ -380,75 +325,36 @@ func (m *AppModel) viewMain() string {
 		Render(
 			lipgloss.JoinVertical(
 				lipgloss.Left,
-				TitleStyle.Render(leftTitle),
-				"",
+				panelTitle(leftTitle, leftInner),
+				panelSeparator(leftInner),
 				lipgloss.JoinVertical(lipgloss.Left, listItems...),
 			),
 		)
 
-	// 3. Right Panel (Details - Night Owl Styled Grid)
 	var rightContent string
 	if inst == nil {
-		rightContent = lipgloss.NewStyle().Foreground(MutedColor).Render("Select an instance from the left list to view details.")
+		rightContent = surfaceLine(rightInner, MutedStyle.Render("Select an instance from the left list to view details."))
 	} else {
-		statusFormatted := StoppedStyle.Render("○ STOPPED")
-		if inst.Status == core.StatusReady {
-			statusFormatted = RunningStyle.Render("● RUNNING")
-		} else if inst.Status == core.StatusStarting {
-			statusFormatted = StartingStyle.Render("◐ STARTING")
-		} else if inst.Status == core.StatusUnknown {
-			statusFormatted = UnknownStyle.Render("? UNKNOWN")
+		codeBoxWidth := rightInner - 16
+		if codeBoxWidth < 20 {
+			codeBoxWidth = 20
 		}
 
-		engineDesc := fmt.Sprintf("%s (%s)", strings.ToUpper(inst.EngineType), strings.ToUpper(inst.Runtime))
-		memFormatted := fmt.Sprintf("%s (Limit: %s)", inst.MemoryUsage, inst.MemoryLimit)
-
-		colGap := 3
-		availW := rightWidth - 6
-		col1W := (availW - colGap) / 2
-		if col1W < 34 {
-			col1W = 34
+		details := renderDetailRows(inst, rightWidth)
+		for i, row := range details {
+			details[i] = surfaceLine(rightInner, row)
 		}
-		col2W := availW - col1W - colGap
-		if col2W < 22 {
-			col2W = 22
-		}
-
-		col1Style := lipgloss.NewStyle().Width(col1W).MarginRight(colGap)
-		col2Style := lipgloss.NewStyle().Width(col2W)
-
-		row1 := lipgloss.JoinHorizontal(lipgloss.Top,
-			col1Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Engine:"), ValueHighlightStyle.Render(engineDesc))),
-			col2Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Container:"), ValueStyle.Render(inst.ContainerName))),
-		)
-		row2 := lipgloss.JoinHorizontal(lipgloss.Top,
-			col1Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Status:"), statusFormatted)),
-			col2Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Memory:"), ValueStyle.Render(memFormatted))),
-		)
-		row3 := lipgloss.JoinHorizontal(lipgloss.Top,
-			col1Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Database:"), ValueStyle.Render(inst.Database))),
-			col2Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Port:"), ValueHighlightStyle.Render(fmt.Sprintf("%d", inst.Port)))),
-		)
-		row4 := lipgloss.JoinHorizontal(lipgloss.Top,
-			col1Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("User:"), ValueStyle.Render(inst.User))),
-			col2Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Schema:"), ValueStyle.Render(inst.Schema))),
-		)
-		row5 := lipgloss.JoinHorizontal(lipgloss.Top,
-			col1Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Volume:"), ValueStyle.Render(inst.Volume))),
-			col2Style.Render(fmt.Sprintf("%s %s", LabelStyle.Render("Project:"), ValueStyle.Render(inst.ProjectName))),
-		)
-
-		details := []string{
-			row1,
-			row2,
-			row3,
-			row4,
-			row5,
-			"",
-			fmt.Sprintf("%s %s", LabelStyle.Render("URI:"), URIBoxStyle.Width(rightWidth-18).Render(inst.ConnectionURI())),
-			"",
-			fmt.Sprintf("%s %s", LabelStyle.Render("CLI:"), CLIBoxStyle.Width(rightWidth-18).Render(inst.CLICommand())),
-		}
+		details = append(details, surfaceBlankLine(rightInner))
+		details = append(details, surfaceLine(rightInner, detailField("URI:",
+			lipgloss.JoinHorizontal(lipgloss.Top,
+				URIBoxStyle.Render(truncateMiddle(inst.ConnectionURI(), codeBoxWidth)),
+				surfaceGap(1),
+				MutedStyle.Render("[c] copy"),
+			),
+		)))
+		details = append(details, surfaceLine(rightInner, detailField("CLI:",
+			CLIBoxStyle.Render(truncateMiddle(inst.CLICommand(), codeBoxWidth)),
+		)))
 		rightContent = lipgloss.JoinVertical(lipgloss.Left, details...)
 	}
 
@@ -458,54 +364,54 @@ func (m *AppModel) viewMain() string {
 		Render(
 			lipgloss.JoinVertical(
 				lipgloss.Left,
-				TitleStyle.Render(" Details & Config "),
-				"",
+				panelTitle("Details & Config", rightInner),
+				panelSeparator(rightInner),
 				rightContent,
 			),
 		)
 
-	mainSplit := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, rightBox)
+	panelGap := lipgloss.NewStyle().Background(BgDark).Render(" ")
+	mainSplit := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, panelGap, rightBox)
 
-	// 4. Status Bar & Shortcuts
 	statusLine := m.statusMsg
 	if statusLine == "" {
 		statusLine = "Ready."
 	}
 	if m.statusIsErr {
-		statusLine = lipgloss.NewStyle().Foreground(ErrorColor).Bold(true).Render(statusLine)
+		statusLine = lipgloss.NewStyle().Foreground(ErrorColor).Bold(true).Background(BgSurface).Render(statusLine)
 	} else {
-		statusLine = lipgloss.NewStyle().Foreground(SecondaryColor).Render(statusLine)
+		statusLine = lipgloss.NewStyle().Foreground(SecondaryColor).Background(BgSurface).Render(statusLine)
 	}
 
-	var shortcuts []string
-	if m.mode == ModeActionMenu {
-		shortcuts = []string{
-			fmt.Sprintf("%s %s", KeyStyle.Render("[↑/↓]"), KeyDescStyle.Render("Select Action")),
-			fmt.Sprintf("%s %s", KeyStyle.Render("[Enter]"), KeyDescStyle.Render("Execute")),
-			fmt.Sprintf("%s %s", KeyStyle.Render("[Esc]"), KeyDescStyle.Render("Back to List")),
-		}
-	} else {
-		shortcuts = []string{
-			fmt.Sprintf("%s %s", KeyStyle.Render("[↑/↓]"), KeyDescStyle.Render("Nav")),
-			fmt.Sprintf("%s %s", KeyStyle.Render("[Enter]"), KeyDescStyle.Render("Actions")),
-			fmt.Sprintf("%s %s", KeyStyle.Render("[/]"), KeyDescStyle.Render("Search")),
-			fmt.Sprintf("%s %s", KeyStyle.Render("[Space]"), KeyDescStyle.Render("Toggle")),
-			fmt.Sprintf("%s %s", KeyStyle.Render("[c]"), KeyDescStyle.Render("URI")),
-			fmt.Sprintf("%s %s", KeyStyle.Render("[l]"), KeyDescStyle.Render("Logs")),
-			fmt.Sprintf("%s %s", KeyStyle.Render("[n]"), KeyDescStyle.Render("New")),
-			fmt.Sprintf("%s %s", KeyStyle.Render("[?]"), KeyDescStyle.Render("Help")),
-			fmt.Sprintf("%s %s", KeyStyle.Render("[q]"), KeyDescStyle.Render("Quit")),
-		}
+	shortcut := func(key, desc string) string {
+		return lipgloss.JoinHorizontal(lipgloss.Top, KeyStyle.Render(key), surfaceGap(1), KeyDescStyle.Render(desc))
 	}
-	shortcutsBar := strings.Join(shortcuts, "  ")
+	shortcuts := []string{
+		shortcut("[↑/↓]", "Nav"),
+		shortcut("[Enter]", "Actions"),
+		shortcut("[/]", "Search"),
+		shortcut("[Space]", "Toggle"),
+		shortcut("[c]", "URI"),
+		shortcut("[l]", "Logs"),
+		shortcut("[n]", "New"),
+		shortcut("[?]", "Help"),
+		shortcut("[q]", "Quit"),
+	}
+	shortcutsBar := formatShortcutBar(m.width-4, shortcuts)
 
+	footerInner := m.width - 4
+	statusRow := surfaceLine(footerInner, lipgloss.JoinHorizontal(lipgloss.Top,
+		lipgloss.NewStyle().Foreground(FgText).Background(BgSurface).Render("Status: "),
+		statusLine,
+	))
 	footer := StatusBarStyle.Width(m.width - 2).Render(
 		lipgloss.JoinVertical(
 			lipgloss.Left,
-			fmt.Sprintf("Status: %s", statusLine),
-			shortcutsBar,
+			statusRow,
+			surfaceLine(footerInner, shortcutsBar),
 		),
 	)
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, mainSplit, footer)
+	gap := lipgloss.NewStyle().Background(BgDark).Width(m.width - 2).Render(" ")
+	return lipgloss.JoinVertical(lipgloss.Left, header, gap, mainSplit, footer)
 }

@@ -3,98 +3,130 @@ package app
 import "github.com/charmbracelet/lipgloss"
 
 var (
-	// Night Owl Color Palette
+	// Night Owl Color Palette (aligned with OpenCode nightowl.json)
 	BgDark         = lipgloss.Color("#011627")
-	BgSurface      = lipgloss.Color("#0b2942")
+	BgSurface      = lipgloss.Color("#0b253a")
+	BgElement      = lipgloss.Color("#0d2137")
 	FgText         = lipgloss.Color("#D6DEEB")
-	PrimaryColor   = lipgloss.Color("#82AAFF") // Functions / Blue Accent
-	SecondaryColor = lipgloss.Color("#ADDB67") // Support / Neon Green
-	AccentColor    = lipgloss.Color("#C792EA") // Keywords / Lavender Purple
-	TealColor      = lipgloss.Color("#7FDBCA") // Variables / Cyan
-	WarningColor   = lipgloss.Color("#ECC48D") // Numbers / Soft Gold
-	ErrorColor     = lipgloss.Color("#EF5350") // Coral Red
-	MutedColor     = lipgloss.Color("#5F7E97") // Search highlight / Slate
-	BorderColor    = lipgloss.Color("#1D3B53") // Deep Navy Border
-	BorderActive   = lipgloss.Color("#82AAFF") // Active Blue Border
-	SelectedBg     = lipgloss.Color("#1D3B53") // Active Selection
-	HeaderBg       = lipgloss.Color("#0b2942")
+	PrimaryColor   = lipgloss.Color("#82AAFF")
+	SecondaryColor = lipgloss.Color("#ADDB67")
+	AccentColor    = lipgloss.Color("#C792EA")
+	TealColor      = lipgloss.Color("#7FDBCA")
+	WarningColor   = lipgloss.Color("#ECC48D")
+	ErrorColor     = lipgloss.Color("#EF5350")
+	MutedColor     = lipgloss.Color("#5F7E97")
+	BorderColor    = lipgloss.Color("#1D3B53")
+	BorderActive   = lipgloss.Color("#82AAFF")
+	SelectedBg     = lipgloss.Color("#1D3B53")
+	HeaderBg       = BgSurface
 
-	// Box Styles
+	HeaderStyle = lipgloss.NewStyle().
+			Background(HeaderBg).
+			Foreground(FgText).
+			Padding(0, 1)
+
 	PanelStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(BorderColor).
+			BorderBackground(BgSurface).
+			Background(BgSurface).
 			Padding(0, 1)
 
 	ActivePanelStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(BorderActive).
+				BorderBackground(BgSurface).
+				Background(BgSurface).
 				Padding(0, 1)
 
+	// Inner text must set Background(BgSurface). Lip Gloss emits SGR reset
+	// when only foreground is set, which punches black holes through the panel.
 	TitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(BgDark).
-			Background(PrimaryColor).
-			Padding(0, 1)
+			Foreground(AccentColor).
+			Background(BgSurface)
 
 	SubTitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(AccentColor)
+			Foreground(AccentColor).
+			Background(BgSurface)
 
-	// List Item Styles
 	SelectedItemStyle = lipgloss.NewStyle().
 				Background(SelectedBg).
 				Bold(true).
-				Foreground(lipgloss.Color("#FFFFFF"))
+				Foreground(FgText)
 
 	NormalItemStyle = lipgloss.NewStyle().
-			Foreground(FgText)
+			Foreground(FgText).
+			Background(BgSurface)
 
-	// Status Indicator Styles
 	RunningStyle = lipgloss.NewStyle().
 			Foreground(SecondaryColor).
-			Bold(true)
+			Bold(true).
+			Background(BgSurface)
 
 	StartingStyle = lipgloss.NewStyle().
 			Foreground(WarningColor).
-			Bold(true)
+			Bold(true).
+			Background(BgSurface)
 
 	StoppedStyle = lipgloss.NewStyle().
 			Foreground(ErrorColor).
-			Bold(true)
+			Bold(true).
+			Background(BgSurface)
 
 	UnknownStyle = lipgloss.NewStyle().
-			Foreground(WarningColor).
-			Bold(true)
+			Foreground(MutedColor).
+			Bold(true).
+			Background(BgSurface)
 
-	// Details Styles
 	LabelStyle = lipgloss.NewStyle().
 			Foreground(MutedColor).
 			Bold(true).
-			Width(14)
+			Width(14).
+			Background(BgSurface)
 
 	ValueStyle = lipgloss.NewStyle().
-			Foreground(FgText)
+			Foreground(FgText).
+			Background(BgSurface)
 
 	ValueHighlightStyle = lipgloss.NewStyle().
 				Foreground(TealColor).
-				Bold(true)
+				Bold(true).
+				Background(BgSurface)
 
 	URIBoxStyle = lipgloss.NewStyle().
-			Background(BgDark).
 			Foreground(TealColor).
-			Padding(0, 1)
+			Background(BgSurface)
 
 	CLIBoxStyle = lipgloss.NewStyle().
-			Background(BgDark).
 			Foreground(WarningColor).
-			Padding(0, 1)
+			Background(BgSurface)
+
+	MutedStyle = lipgloss.NewStyle().
+			Foreground(MutedColor).
+			Background(BgSurface)
+
+	SeparatorStyle = lipgloss.NewStyle().
+			Foreground(BorderColor).
+			Background(BgSurface)
 
 	EnvBoxStyle = lipgloss.NewStyle().
-			Background(BgDark).
-			Foreground(FgText).
-			Padding(0, 1)
+			Background(BgSurface).
+			Foreground(FgText)
 
-	// Footer & Status Bar
+	InputBoxStyle = lipgloss.NewStyle().
+			Background(BgSurface).
+			Foreground(FgText)
+
+	FilterBoxStyle = lipgloss.NewStyle().
+			Foreground(TealColor).
+			Background(BgSurface)
+
+	LogAreaStyle = lipgloss.NewStyle().
+			Background(BgSurface).
+			Foreground(FgText)
+
 	StatusBarStyle = lipgloss.NewStyle().
 			Foreground(FgText).
 			Background(BgSurface).
@@ -102,12 +134,23 @@ var (
 
 	KeyStyle = lipgloss.NewStyle().
 			Foreground(PrimaryColor).
-			Bold(true)
+			Bold(true).
+			Background(BgSurface)
 
 	KeyDescStyle = lipgloss.NewStyle().
-			Foreground(FgText)
+			Foreground(FgText).
+			Background(BgSurface)
 
 	BadgeStyle = lipgloss.NewStyle().
 			Background(SelectedBg).
 			Padding(0, 1)
+
+	BadgeOnlineStyle = BadgeStyle.Copy().
+				Foreground(SecondaryColor)
+
+	BadgeOfflineStyle = BadgeStyle.Copy().
+				Foreground(ErrorColor)
+
+	BadgeUnknownStyle = BadgeStyle.Copy().
+				Foreground(MutedColor)
 )
