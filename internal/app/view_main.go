@@ -249,21 +249,15 @@ func (m *AppModel) purgeInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
 }
 
 func (m *AppModel) viewMain() string {
-	leftWidth := m.width/3 - 2
-	if leftWidth < 36 {
-		leftWidth = 36
-	}
-	rightWidth := m.width - leftWidth - 5
-	if rightWidth < 45 {
-		rightWidth = 45
-	}
+	inner := screenInnerWidth(m.width)
+	leftWidth, rightWidth, gapW := splitPanelWidths(inner)
 	contentHeight := mainContentHeight(m.height)
 
 	dockerBadge := engineBadge("Docker", m.dockerHealth)
 	podmanBadge := engineBadge("Podman", m.podmanHealth)
 
 	header := HeaderStyle.
-		Width(m.width - 2).
+		Width(inner).
 		Render(
 			lipgloss.JoinHorizontal(
 				lipgloss.Top,
@@ -319,14 +313,13 @@ func (m *AppModel) viewMain() string {
 		leftTitle = fmt.Sprintf("Filter (%d/%d)", len(filteredList), len(m.instances))
 	}
 
-	leftBox := ActivePanelStyle.
+	leftBox := panelBoxStyle(true).
 		Width(leftWidth).
 		Height(contentHeight).
 		Render(
 			lipgloss.JoinVertical(
 				lipgloss.Left,
 				panelTitle(leftTitle, leftInner),
-				panelSeparator(leftInner),
 				lipgloss.JoinVertical(lipgloss.Left, listItems...),
 			),
 		)
@@ -358,19 +351,18 @@ func (m *AppModel) viewMain() string {
 		rightContent = lipgloss.JoinVertical(lipgloss.Left, details...)
 	}
 
-	rightBox := PanelStyle.
+	rightBox := panelBoxStyle(false).
 		Width(rightWidth).
 		Height(contentHeight).
 		Render(
 			lipgloss.JoinVertical(
 				lipgloss.Left,
 				panelTitle("Details & Config", rightInner),
-				panelSeparator(rightInner),
 				rightContent,
 			),
 		)
 
-	panelGap := lipgloss.NewStyle().Background(BgDark).Render(" ")
+	panelGap := lipgloss.NewStyle().Background(BgDark).Width(gapW).Render(" ")
 	mainSplit := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, panelGap, rightBox)
 
 	statusLine := m.statusMsg
@@ -397,14 +389,14 @@ func (m *AppModel) viewMain() string {
 		shortcut("[?]", "Help"),
 		shortcut("[q]", "Quit"),
 	}
-	shortcutsBar := formatShortcutBar(m.width-4, shortcuts)
+	shortcutsBar := formatShortcutBar(inner-2, shortcuts)
 
-	footerInner := m.width - 4
+	footerInner := inner - 2
 	statusRow := surfaceLine(footerInner, lipgloss.JoinHorizontal(lipgloss.Top,
 		lipgloss.NewStyle().Foreground(FgText).Background(BgSurface).Render("Status: "),
 		statusLine,
 	))
-	footer := StatusBarStyle.Width(m.width - 2).Render(
+	footer := StatusBarStyle.Width(inner).Render(
 		lipgloss.JoinVertical(
 			lipgloss.Left,
 			statusRow,
@@ -412,6 +404,5 @@ func (m *AppModel) viewMain() string {
 		),
 	)
 
-	gap := lipgloss.NewStyle().Background(BgDark).Width(m.width - 2).Render(" ")
-	return lipgloss.JoinVertical(lipgloss.Left, header, gap, mainSplit, footer)
+	return lipgloss.JoinVertical(lipgloss.Left, header, mainSplit, footer)
 }

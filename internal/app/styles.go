@@ -26,16 +26,16 @@ var (
 			Padding(0, 1)
 
 	PanelStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
+			Border(lipgloss.NormalBorder()).
 			BorderForeground(BorderColor).
-			BorderBackground(BgSurface).
+			BorderBackground(BgDark).
 			Background(BgSurface).
 			Padding(0, 1)
 
 	ActivePanelStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
+				Border(lipgloss.NormalBorder()).
 				BorderForeground(BorderActive).
-				BorderBackground(BgSurface).
+				BorderBackground(BgDark).
 				Background(BgSurface).
 				Padding(0, 1)
 

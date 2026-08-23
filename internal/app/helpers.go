@@ -98,8 +98,41 @@ func surfaceGap(n int) string {
 	return lipgloss.NewStyle().Background(BgSurface).Render(strings.Repeat(" ", n))
 }
 
-func panelInnerWidth(panelWidth int) int {
-	w := panelWidth - 4 // border + padding
+func screenInnerWidth(termWidth int) int {
+	w := termWidth - 2 // wrapScreen horizontal padding
+	if w < 40 {
+		return 40
+	}
+	return w
+}
+
+func splitPanelWidths(innerWidth int) (left, right, gap int) {
+	gap = 1
+	avail := innerWidth - gap - 4 // two 1-cell borders per panel
+	if avail < 16 {
+		avail = 16
+	}
+	left = avail / 3
+	if left < 34 {
+		left = 34
+	}
+	right = avail - left
+	if right < 8 {
+		right = 8
+		left = avail - right
+	}
+	return left, right, gap
+}
+
+func panelBoxStyle(active bool) lipgloss.Style {
+	if active {
+		return ActivePanelStyle
+	}
+	return PanelStyle
+}
+
+func panelInnerWidth(contentWidth int) int {
+	w := contentWidth - 2 // horizontal padding only; borders sit outside Width()
 	if w < 8 {
 		return 8
 	}
@@ -116,10 +149,6 @@ func surfaceLine(width int, content string) string {
 
 func panelTitle(text string, width int) string {
 	return TitleStyle.Width(width).Render(text)
-}
-
-func panelSeparator(width int) string {
-	return SeparatorStyle.Width(width).Render(strings.Repeat("─", width))
 }
 
 func surfaceBlankLine(width int) string {
@@ -240,8 +269,8 @@ func renderListLine(status core.ContainerStatus, runtimeTag, engineLabel, name s
 }
 
 func mainContentHeight(termHeight int) int {
-	// header ~2, footer ~3, panel borders ~2, margins ~1
-	const reserved = 8
+	// header 1 + panel borders 2 + footer 2
+	const reserved = 5
 	h := termHeight - reserved
 	if h < 6 {
 		return 6
