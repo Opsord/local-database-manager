@@ -89,3 +89,32 @@ go run ./cmd/db-manager
 ```bash
 go build -o db-manager.exe ./cmd/db-manager
 ```
+
+---
+
+## Cursor Cloud specific instructions
+
+Standard commands (test/run/build) are documented above and in `README.md`. Go deps are refreshed automatically by the environment update script (`go mod download`). Notes below are the non-obvious gotchas for this VM.
+
+### Docker (required for real end-to-end container lifecycle)
+The app shells out to `docker` / `podman` directly (see `internal/core/runner.go`) to manage database containers. Docker CE is preinstalled in the base image, but a few caveats apply:
+
+- **No systemd in this container**, so `systemctl start docker` does NOT work. Start the daemon manually (persist it in a tmux session), e.g.:
+  ```bash
+  sudo dockerd > /tmp/dockerd.log 2>&1 &
+  ```
+- **The daemon socket must be accessible without sudo**, because the app invokes `docker` as the `ubuntu` user (not via sudo). Group membership changes don't take effect in existing sessions here, so after starting the daemon run:
+  ```bash
+  sudo chmod 666 /var/run/docker.sock
+  ```
+- **Storage/driver config is pinned in `/etc/docker/daemon.json`**: `fuse-overlayfs` storage driver with the containerd snapshotter disabled. This is required because Docker 29 + this VM's kernel cannot use the default `overlay2`. Do not remove this or the daemon will fail to start containers.
+- Verify with `docker info` (expect `Docker: ONLINE` in the TUI header) and `docker run --rm hello-world`.
+
+### Running / demoing the TUI
+- It is a full-screen Bubble Tea alt-screen TUI; interact with it in a real terminal (computer-use), not by piping.
+- Wizard flow (`n`): after typing the instance Name, the remaining fields auto-fill, so you can press `Enter` through them to the review step.
+- Instance `.env` files created by the wizard land in `instances/*.env` and are git-ignored — never commit them.
+- The list may show a container as `RUNNING` immediately; the `READY` (TCP accepting-connections) state is re-probed on refresh (`r`).
+
+### Lint note
+`gofmt -l .` reports `internal/app/tui.go` as unformatted; this is pre-existing in the repo, not something introduced by setup. `go vet ./...` passes clean.
