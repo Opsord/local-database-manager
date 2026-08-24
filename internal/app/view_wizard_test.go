@@ -78,7 +78,7 @@ func reviewModel(width, height int) *AppModel {
 	m.wizard.inputs[2].SetValue("5433")
 	m.wizard.inputs[3].SetValue("shop_db")
 	m.wizard.inputs[4].SetValue("pgdata_shop")
-	m.wizard.inputs[5].SetValue("postgres")
+	m.wizard.inputs[5].SetValue("s3cretPass")
 	m.wizard.inputs[6].SetValue("512M")
 	return m
 }
@@ -112,11 +112,14 @@ func TestWizardReviewUsesDisplayLabels(t *testing.T) {
 	}
 }
 
-func TestWizardReviewHidesPasswordAndIdlePrompts(t *testing.T) {
+func TestWizardReviewShowsPasswordAndHidesIdlePrompts(t *testing.T) {
 	t.Parallel()
 	plain := stripANSI(reviewModel(120, 32).View())
-	if strings.Contains(plain, "postgres") {
-		t.Fatalf("password leaked into view:\n%s", plain)
+	if !strings.Contains(plain, "s3cretPass") {
+		t.Fatalf("password missing from review:\n%s", plain)
+	}
+	if strings.Contains(plain, "•") {
+		t.Fatalf("password still masked:\n%s", plain)
 	}
 	if strings.Count(plain, ">") > 0 {
 		t.Fatalf("completed fields still show input prompt:\n%s", plain)

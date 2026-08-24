@@ -96,8 +96,6 @@ func newWizardModel(projectRoot, instancesDir string, existing []*core.DatabaseI
 
 	inputs[5] = styleTextInput(textinput.New())
 	inputs[5].SetValue("postgres")
-	inputs[5].EchoMode = textinput.EchoPassword
-	inputs[5].EchoCharacter = '•'
 
 	inputs[6] = styleTextInput(textinput.New())
 	inputs[6].SetValue("512M")
@@ -406,9 +404,7 @@ func (m *AppModel) viewWizard() string {
 		content = append(content, m.wizardValueRow(inner, "7. Volume:", truncateEnd(w.inputs[4].Value(), inputWidth), 4, ""))
 	}
 	if w.step >= StepPassword {
-		pass := w.inputs[5].Value()
-		masked := strings.Repeat("•", len([]rune(pass)))
-		content = append(content, m.wizardValueRow(inner, "8. Password:", truncateEnd(masked, inputWidth), 5, ""))
+		content = append(content, m.wizardValueRow(inner, "8. Password:", truncateEnd(w.inputs[5].Value(), inputWidth), 5, ""))
 	}
 	if w.step >= StepMemoryLimit {
 		recommendation := "(Recommended: 512M - 1G)"
