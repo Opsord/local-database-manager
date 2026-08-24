@@ -385,6 +385,7 @@ func (m *AppModel) viewMain() string {
 		shortcut("[Space]", "Toggle"),
 		shortcut("[c]", "URI"),
 		shortcut("[l]", "Logs"),
+		shortcut("[d]", "Purge"),
 		shortcut("[n]", "New"),
 		shortcut("[?]", "Help"),
 		shortcut("[q]", "Quit"),

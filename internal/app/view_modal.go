@@ -150,10 +150,23 @@ func (m *AppModel) updateActionMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.actionMenuIndex >= 0 && m.actionMenuIndex < len(items) {
 				return items[m.actionMenuIndex].action(m, inst)
 			}
+		default:
+			for _, item := range items {
+				if actionMenuItemMatchesKey(item, msg.String()) {
+					return item.action(m, inst)
+				}
+			}
 		}
 	}
 
 	return m, nil
+}
+
+func actionMenuItemMatchesKey(item actionMenuItem, key string) bool {
+	if strings.EqualFold(item.shortcut, "Space") {
+		return key == " "
+	}
+	return item.shortcut == key
 }
 
 func (m *AppModel) viewActionMenu() string {

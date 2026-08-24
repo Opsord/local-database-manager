@@ -46,6 +46,11 @@ func TestRunner_BuildComposeArgs(t *testing.T) {
 	if !strings.Contains(joined, "up -d") {
 		t.Errorf("expected 'up -d' in args, got '%s'", joined)
 	}
+
+	_, downV := runner.BuildComposeArgs(inst, "down", "-v")
+	if !strings.Contains(strings.Join(downV, " "), "down -v") {
+		t.Errorf("expected 'down -v' in args, got '%s'", strings.Join(downV, " "))
+	}
 }
 
 func TestRunner_PodmanCompose(t *testing.T) {
