@@ -19,7 +19,14 @@ func (m *AppModel) wrapScreen(content string) string {
 }
 
 func (m *AppModel) renderOverlay(modal string) string {
-	return lipgloss.Place(m.width-2, m.height, lipgloss.Center, lipgloss.Center, modal)
+	return lipgloss.Place(
+		m.width-2,
+		m.height,
+		lipgloss.Center,
+		lipgloss.Center,
+		modal,
+		lipgloss.WithWhitespaceBackground(BgDark),
+	)
 }
 
 func truncateMiddle(s string, max int) string {
@@ -80,10 +87,13 @@ func engineBadge(name string, health core.EngineHealth) string {
 }
 
 func styleTextInput(ti textinput.Model) textinput.Model {
-	ti.PromptStyle = lipgloss.NewStyle().Foreground(AccentColor)
-	ti.TextStyle = lipgloss.NewStyle().Foreground(FgText)
-	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(MutedColor)
-	ti.Cursor.Style = lipgloss.NewStyle().Foreground(PrimaryColor)
+	surface := lipgloss.NewStyle().Foreground(FgText).Background(BgSurface)
+	ti.Prompt = ""
+	ti.PromptStyle = lipgloss.NewStyle().Foreground(AccentColor).Background(BgSurface)
+	ti.TextStyle = surface
+	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(MutedColor).Background(BgSurface)
+	ti.Cursor.Style = lipgloss.NewStyle().Foreground(PrimaryColor).Background(BgSurface)
+	ti.Cursor.TextStyle = surface
 	return ti
 }
 
@@ -149,6 +159,13 @@ func surfaceLine(width int, content string) string {
 
 func panelTitle(text string, width int) string {
 	return TitleStyle.Width(width).Render(text)
+}
+
+func panelSeparator(width int) string {
+	if width < 1 {
+		width = 1
+	}
+	return SeparatorStyle.Width(width).Render(strings.Repeat("─", width))
 }
 
 func surfaceBlankLine(width int) string {

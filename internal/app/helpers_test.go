@@ -5,7 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 func TestSplitPanelWidthsFitInner(t *testing.T) {
@@ -56,5 +58,30 @@ func TestPanelInnerWidthMatchesPadding(t *testing.T) {
 	line := surfaceLine(inner, "title")
 	if lipgloss.Width(line) != inner {
 		t.Fatalf("surface line width=%d want %d", lipgloss.Width(line), inner)
+	}
+}
+
+func TestRenderOverlayPaintsWhitespace(t *testing.T) {
+	// SetColorProfile is process-global; do not run this in parallel.
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	m := &AppModel{width: 40, height: 10}
+	out := m.renderOverlay("X")
+	if !strings.Contains(out, "48;2;1;22;39") {
+		t.Fatalf("overlay whitespace missing BgDark: %q", out)
+	}
+}
+
+func TestStyleTextInputSetsSurfaceBackground(t *testing.T) {
+	// SetColorProfile is process-global; do not run this in parallel.
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	ti := styleTextInput(textinput.New())
+	ti.SetValue("abc")
+	ti.Focus()
+	// Inspect the input's own view (not wrapInputField): the wrapper already
+	// emits BgSurface, then inner SGR resets punch holes through it.
+	view := ti.View()
+	// BgSurface #0b253a → 11;37;58 (Lip Gloss may round to 11;36;58)
+	if !strings.Contains(view, "48;2;11;37;58") && !strings.Contains(view, "48;2;11;36;58") {
+		t.Fatalf("input view missing BgSurface: %q", view)
 	}
 }

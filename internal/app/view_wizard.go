@@ -45,6 +45,33 @@ type wizardModel struct {
 	inputs []textinput.Model
 }
 
+func engineDisplay(id string) string {
+	if id == "sqlserver" {
+		return "SQL Server"
+	}
+	return "Postgres"
+}
+
+func runtimeDisplay(id string) string {
+	if id == "podman" {
+		return "Podman"
+	}
+	return "Docker"
+}
+
+func (w *wizardModel) blurAll() {
+	for i := range w.inputs {
+		w.inputs[i].Blur()
+	}
+}
+
+func (w *wizardModel) focusInput(i int) {
+	w.blurAll()
+	if i >= 0 && i < len(w.inputs) {
+		w.inputs[i].Focus()
+	}
+}
+
 func newWizardModel(projectRoot, instancesDir string, existing []*core.DatabaseInstance) wizardModel {
 	engines := []string{"postgres", "sqlserver"}
 	runtimes := []string{"docker", "podman"}
@@ -53,7 +80,6 @@ func newWizardModel(projectRoot, instancesDir string, existing []*core.DatabaseI
 
 	inputs[0] = styleTextInput(textinput.New())
 	inputs[0].Placeholder = "my_new_instance"
-	inputs[0].Focus()
 
 	inputs[1] = styleTextInput(textinput.New())
 	inputs[1].Placeholder = "pg-my-new-instance"
@@ -70,11 +96,18 @@ func newWizardModel(projectRoot, instancesDir string, existing []*core.DatabaseI
 
 	inputs[5] = styleTextInput(textinput.New())
 	inputs[5].SetValue("postgres")
+	inputs[5].EchoMode = textinput.EchoPassword
+	inputs[5].EchoCharacter = '•'
 
 	inputs[6] = styleTextInput(textinput.New())
 	inputs[6].SetValue("512M")
 
-	return wizardModel{
+	for i := range inputs {
+		inputs[i].Prompt = ""
+		inputs[i].Width = 32
+	}
+
+	w := wizardModel{
 		projectRoot:        projectRoot,
 		instancesDir:       instancesDir,
 		instances:          existing,
@@ -85,6 +118,8 @@ func newWizardModel(projectRoot, instancesDir string, existing []*core.DatabaseI
 		runtimes:           runtimes,
 		inputs:             inputs,
 	}
+	w.blurAll()
+	return w
 }
 
 func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -103,11 +138,12 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch w.step {
 			case StepEngine:
 				w.step = StepRuntime
+				w.blurAll()
 				return m, nil
 
 			case StepRuntime:
 				w.step = StepName
-				w.inputs[0].Focus()
+				w.focusInput(0)
 				return m, nil
 
 			case StepName:
@@ -152,36 +188,37 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				w.step = StepContainerName
-				w.inputs[1].Focus()
+				w.focusInput(1)
 				return m, nil
 
 			case StepContainerName:
 				w.step = StepPort
-				w.inputs[2].Focus()
+				w.focusInput(2)
 				return m, nil
 
 			case StepPort:
 				w.step = StepDatabase
-				w.inputs[3].Focus()
+				w.focusInput(3)
 				return m, nil
 
 			case StepDatabase:
 				w.step = StepVolume
-				w.inputs[4].Focus()
+				w.focusInput(4)
 				return m, nil
 
 			case StepVolume:
 				w.step = StepPassword
-				w.inputs[5].Focus()
+				w.focusInput(5)
 				return m, nil
 
 			case StepPassword:
 				w.step = StepMemoryLimit
-				w.inputs[6].Focus()
+				w.focusInput(6)
 				return m, nil
 
 			case StepMemoryLimit:
 				w.step = StepReview
+				w.blurAll()
 				return m, nil
 
 			case StepReview:
@@ -277,6 +314,21 @@ SQLSERVER_VOLUME=%s
 	return os.WriteFile(filePath, []byte(content), 0644)
 }
 
+func (m *AppModel) wizardValueRow(inner int, label, value string, inputIdx int, extra string) string {
+	w := &m.wizard
+	parts := []string{LabelStyle.Render(label)}
+	active := w.step == wizardStep(int(StepName)+inputIdx)
+	if active && w.step != StepReview {
+		parts = append(parts, wrapInputField(w.inputs[inputIdx].View()))
+	} else {
+		parts = append(parts, ValueStyle.Render(value))
+	}
+	if extra != "" {
+		parts = append(parts, MutedStyle.Render(extra))
+	}
+	return surfaceLine(inner, joinWithSurfaceGaps(parts, 1))
+}
+
 func (m *AppModel) viewWizard() string {
 	w := &m.wizard
 	boxWidth := m.width - 12
@@ -287,80 +339,90 @@ func (m *AppModel) viewWizard() string {
 		boxWidth = 72
 	}
 
-	var content []string
-	content = append(content, TitleStyle.Render("New Database Instance"))
-	content = append(content, SeparatorStyle.Render(strings.Repeat("─", boxWidth-4)))
-	content = append(content, surfaceGap(1))
+	inner := panelInnerWidth(boxWidth)
+	inputWidth := inner - 14 - 1
+	if inputWidth < 8 {
+		inputWidth = 8
+	}
+	for i := range w.inputs {
+		w.inputs[i].Width = inputWidth
+	}
 
-	engineParts := []string{LabelStyle.Render("1. Engine:")}
+	row := func(parts ...string) string {
+		return surfaceLine(inner, joinWithSurfaceGaps(parts, 1))
+	}
+
+	content := []string{
+		surfaceLine(inner, TitleStyle.Render("New Database Instance")),
+		panelSeparator(inner),
+		surfaceBlankLine(inner),
+	}
+
 	if w.step == StepEngine {
+		parts := []string{LabelStyle.Render("1. Engine:")}
 		for i, eng := range w.engines {
-			label := eng
-			if eng == "postgres" {
-				label = "Postgres"
-			} else if eng == "sqlserver" {
-				label = "SQL Server"
-			}
+			label := engineDisplay(eng)
 			if i == w.selectedEngineIdx {
-				engineParts = append(engineParts, SelectedItemStyle.Render(fmt.Sprintf(" [%s] ", label)))
+				parts = append(parts, SelectedItemStyle.Render(fmt.Sprintf(" [%s] ", label)))
 			} else {
-				engineParts = append(engineParts, NormalItemStyle.Render(fmt.Sprintf(" %s ", label)))
+				parts = append(parts, NormalItemStyle.Render(fmt.Sprintf(" %s ", label)))
 			}
 		}
+		content = append(content, row(parts...))
 	} else {
-		engineParts = append(engineParts, ValueHighlightStyle.Render(w.engines[w.selectedEngineIdx]))
+		content = append(content, row(LabelStyle.Render("1. Engine:"), ValueHighlightStyle.Render(engineDisplay(w.engines[w.selectedEngineIdx]))))
 	}
-	content = append(content, joinWithSurfaceGaps(engineParts, 1))
 
 	if w.step >= StepRuntime {
-		runtimeParts := []string{LabelStyle.Render("2. Runtime:")}
 		if w.step == StepRuntime {
+			parts := []string{LabelStyle.Render("2. Runtime:")}
 			for i, r := range w.runtimes {
+				label := runtimeDisplay(r)
 				if i == w.selectedRuntimeIdx {
-					runtimeParts = append(runtimeParts, SelectedItemStyle.Render(fmt.Sprintf(" [%s] ", r)))
+					parts = append(parts, SelectedItemStyle.Render(fmt.Sprintf(" [%s] ", label)))
 				} else {
-					runtimeParts = append(runtimeParts, NormalItemStyle.Render(fmt.Sprintf(" %s ", r)))
+					parts = append(parts, NormalItemStyle.Render(fmt.Sprintf(" %s ", label)))
 				}
 			}
+			content = append(content, row(parts...))
 		} else {
-			runtimeParts = append(runtimeParts, ValueHighlightStyle.Render(w.runtimes[w.selectedRuntimeIdx]))
+			content = append(content, row(LabelStyle.Render("2. Runtime:"), ValueHighlightStyle.Render(runtimeDisplay(w.runtimes[w.selectedRuntimeIdx]))))
 		}
-		content = append(content, joinWithSurfaceGaps(runtimeParts, 1))
 	}
 
 	if w.step >= StepName {
-		content = append(content, lipgloss.JoinHorizontal(lipgloss.Top, LabelStyle.Render("3. Name:"), surfaceGap(1), wrapInputField(w.inputs[0].View())))
+		content = append(content, m.wizardValueRow(inner, "3. Name:", truncateEnd(w.inputs[0].Value(), inputWidth), 0, ""))
 	}
 	if w.step >= StepContainerName {
-		content = append(content, lipgloss.JoinHorizontal(lipgloss.Top, LabelStyle.Render("4. Container:"), surfaceGap(1), wrapInputField(w.inputs[1].View())))
+		content = append(content, m.wizardValueRow(inner, "4. Container:", truncateEnd(w.inputs[1].Value(), inputWidth), 1, ""))
 	}
 	if w.step >= StepPort {
-		content = append(content, lipgloss.JoinHorizontal(lipgloss.Top, LabelStyle.Render("5. Port:"), surfaceGap(1), wrapInputField(w.inputs[2].View())))
+		content = append(content, m.wizardValueRow(inner, "5. Port:", truncateEnd(w.inputs[2].Value(), inputWidth), 2, ""))
 	}
 	if w.step >= StepDatabase {
-		content = append(content, lipgloss.JoinHorizontal(lipgloss.Top, LabelStyle.Render("6. Database:"), surfaceGap(1), wrapInputField(w.inputs[3].View())))
+		content = append(content, m.wizardValueRow(inner, "6. Database:", truncateEnd(w.inputs[3].Value(), inputWidth), 3, ""))
 	}
 	if w.step >= StepVolume {
-		content = append(content, lipgloss.JoinHorizontal(lipgloss.Top, LabelStyle.Render("7. Volume:"), surfaceGap(1), wrapInputField(w.inputs[4].View())))
+		content = append(content, m.wizardValueRow(inner, "7. Volume:", truncateEnd(w.inputs[4].Value(), inputWidth), 4, ""))
 	}
 	if w.step >= StepPassword {
-		content = append(content, lipgloss.JoinHorizontal(lipgloss.Top, LabelStyle.Render("8. Password:"), surfaceGap(1), wrapInputField(w.inputs[5].View())))
+		pass := w.inputs[5].Value()
+		masked := strings.Repeat("•", len([]rune(pass)))
+		content = append(content, m.wizardValueRow(inner, "8. Password:", truncateEnd(masked, inputWidth), 5, ""))
 	}
 	if w.step >= StepMemoryLimit {
-		engine := w.engines[w.selectedEngineIdx]
 		recommendation := "(Recommended: 512M - 1G)"
-		if engine == "sqlserver" {
+		if w.engines[w.selectedEngineIdx] == "sqlserver" {
 			recommendation = "(Recommended: 2G min for MSSQL)"
 		}
-		content = append(content, lipgloss.JoinHorizontal(lipgloss.Top, LabelStyle.Render("9. Memory:"), surfaceGap(1), wrapInputField(w.inputs[6].View()), surfaceGap(1), MutedStyle.Render(recommendation)))
+		content = append(content, m.wizardValueRow(inner, "9. Memory:", truncateEnd(w.inputs[6].Value(), inputWidth), 6, recommendation))
 	}
 
+	content = append(content, surfaceBlankLine(inner))
 	if w.step == StepReview {
-		content = append(content, surfaceGap(1))
-		content = append(content, RunningStyle.Render("All set! Press [Enter] to create the instance or [Esc] to cancel."))
+		content = append(content, surfaceLine(inner, RunningStyle.Render("All set! Press [Enter] to create the instance or [Esc] to cancel.")))
 	} else {
-		content = append(content, surfaceGap(1))
-		content = append(content, MutedStyle.Render("Press [Enter] to advance, [↑/↓] for options, [Esc] to cancel."))
+		content = append(content, surfaceLine(inner, MutedStyle.Render("Press [Enter] to advance, [↑/↓] for options, [Esc] to cancel.")))
 	}
 
 	return ActivePanelStyle.
