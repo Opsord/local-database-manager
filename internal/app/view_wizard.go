@@ -10,6 +10,7 @@ import (
 	"local-database-manager/internal/core"
 
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -45,6 +46,8 @@ type wizardModel struct {
 	runtimes []string
 
 	inputs []textinput.Model
+
+	scrollViewport viewport.Model
 }
 
 func engineDisplay(id string) string {
@@ -118,6 +121,7 @@ func newWizardModel(projectRoot, instancesDir string, existing []*core.DatabaseI
 		engines:            engines,
 		runtimes:           runtimes,
 		inputs:             inputs,
+		scrollViewport:     viewport.New(60, 8),
 	}
 	w.blurAll()
 	return w
@@ -135,6 +139,7 @@ func (w *wizardModel) setFocus(step wizardStep) {
 	if step >= StepName && step <= StepMemoryLimit {
 		w.focusInput(int(step) - int(StepName))
 	}
+	w.syncScrollToFocus()
 }
 
 func (w *wizardModel) moveFocus(delta int) {
@@ -437,18 +442,51 @@ func (m *AppModel) wizardValueRow(inner int, label, value string, inputIdx int, 
 	return surfaceLine(inner, joinWithSurfaceGaps(parts, 1))
 }
 
-func (m *AppModel) viewWizard() string {
-	w := &m.wizard
-	boxWidth := m.width - 12
-	if boxWidth < 50 {
-		boxWidth = 50
+func (w *wizardModel) bodyLineForStep(step wizardStep) int {
+	// Body is only unlocked field rows (title/hints are fixed outside the viewport).
+	focusStep := step
+	if focusStep > StepMemoryLimit {
+		focusStep = StepMemoryLimit
 	}
-	if boxWidth > 72 {
-		boxWidth = 72
+	line := 0
+	for s := StepEngine; s <= focusStep; s++ {
+		if s <= w.maxReached {
+			line++
+		}
 	}
+	if line == 0 {
+		return 0
+	}
+	return line - 1
+}
 
-	inner := panelInnerWidth(boxWidth)
-	inputWidth := inner - 14 - 1
+func (w *wizardModel) syncScrollToFocus() {
+	if w.step == StepReview {
+		w.scrollViewport.GotoBottom()
+		return
+	}
+	target := w.bodyLineForStep(w.step)
+	if target < w.scrollViewport.YOffset {
+		w.scrollViewport.YOffset = target
+	}
+	if w.scrollViewport.Height > 0 && target >= w.scrollViewport.YOffset+w.scrollViewport.Height {
+		w.scrollViewport.YOffset = target - w.scrollViewport.Height + 1
+	}
+	if w.scrollViewport.YOffset < 0 {
+		w.scrollViewport.YOffset = 0
+	}
+}
+
+func (w *wizardModel) wizardHintsLine(inner int) string {
+	if w.step == StepReview {
+		return surfaceLine(inner, RunningStyle.Render("All set! Press [Enter] to create the instance, [↑/b] to edit, or [Esc] to cancel."))
+	}
+	return surfaceLine(inner, MutedStyle.Render("[↑↓] rows  [←→] options  [Enter] next  [b] back  [Esc] cancel"))
+}
+
+func (m *AppModel) viewWizardDock(innerWidth, dockHeight int) string {
+	w := &m.wizard
+	inputWidth := innerWidth - 14 - 1
 	if inputWidth < 8 {
 		inputWidth = 8
 	}
@@ -456,15 +494,31 @@ func (m *AppModel) viewWizard() string {
 		w.inputs[i].Width = inputWidth
 	}
 
+	title := surfaceLine(innerWidth, TitleStyle.Render("New Database Instance"))
+	hints := w.wizardHintsLine(innerWidth)
+	// Title + hints are fixed; body scrolls in the remaining rows.
+	scrollHeight := dockHeight - 2
+	if scrollHeight < 1 {
+		scrollHeight = 1
+	}
+
+	body := m.buildWizardBodyRows(innerWidth, inputWidth)
+	w.scrollViewport.Width = innerWidth
+	w.scrollViewport.Height = scrollHeight
+	w.scrollViewport.SetContent(body)
+	w.syncScrollToFocus()
+
+	return lipgloss.JoinVertical(lipgloss.Left, title, w.scrollViewport.View(), hints)
+}
+
+func (m *AppModel) buildWizardBodyRows(inner, inputWidth int) string {
+	w := &m.wizard
+
 	row := func(parts ...string) string {
 		return surfaceLine(inner, joinWithSurfaceGaps(parts, 1))
 	}
 
-	content := []string{
-		surfaceLine(inner, TitleStyle.Render("New Database Instance")),
-		panelSeparator(inner),
-		surfaceBlankLine(inner),
-	}
+	var content []string
 
 	if w.maxReached >= StepEngine {
 		if w.step == StepEngine {
@@ -526,14 +580,21 @@ func (m *AppModel) viewWizard() string {
 		content = append(content, m.wizardValueRow(inner, "9. Memory:", truncateEnd(w.inputs[6].Value(), inputWidth), 6, recommendation))
 	}
 
-	content = append(content, surfaceBlankLine(inner))
-	if w.step == StepReview {
-		content = append(content, surfaceLine(inner, RunningStyle.Render("All set! Press [Enter] to create the instance, [↑/b] to edit, or [Esc] to cancel.")))
-	} else {
-		content = append(content, surfaceLine(inner, MutedStyle.Render("[↑↓] rows  [←→] options  [Enter] next  [b] back  [Esc] cancel")))
+	if len(content) == 0 {
+		return surfaceBlankLine(inner)
 	}
+	return lipgloss.JoinVertical(lipgloss.Left, content...)
+}
 
+func (m *AppModel) viewWizard() string {
+	inner := screenInnerWidth(m.width)
+	_, rightWidth, _ := splitPanelWidths(inner)
+	contentHeight := mainContentHeight(m.height)
+	_, dockHeight := splitPanelHalfHeight(contentHeight - 1)
+	rightInner := panelInnerWidth(rightWidth)
+	dock := m.viewWizardDock(rightInner, dockHeight)
 	return ActivePanelStyle.
-		Width(boxWidth).
-		Render(lipgloss.JoinVertical(lipgloss.Left, content...))
+		Width(rightWidth).
+		Height(dockHeight + 2).
+		Render(dock)
 }

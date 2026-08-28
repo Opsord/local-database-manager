@@ -294,3 +294,22 @@ func mainContentHeight(termHeight int) int {
 	}
 	return h
 }
+
+func splitPanelHalfHeight(contentHeight int) (top, bottom int) {
+	top = contentHeight / 2
+	bottom = contentHeight - top
+	if top < 3 {
+		top = 3
+	}
+	if bottom < 3 {
+		bottom = 3
+	}
+	if top+bottom > contentHeight {
+		top = contentHeight - bottom
+		if top < 3 {
+			top = 3
+			bottom = contentHeight - top
+		}
+	}
+	return top, bottom
+}

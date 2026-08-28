@@ -9,6 +9,7 @@ import (
 	"local-database-manager/internal/config"
 	"local-database-manager/internal/core"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
@@ -344,8 +345,9 @@ func TestWizardReviewShowsPasswordAndHidesIdlePrompts(t *testing.T) {
 	if strings.Contains(plain, "•") {
 		t.Fatalf("password still masked:\n%s", plain)
 	}
-	if strings.Count(plain, ">") > 0 {
-		t.Fatalf("completed fields still show input prompt:\n%s", plain)
+	// One ">" comes from the selected row in the instance list, not wizard inputs.
+	if strings.Count(plain, ">") > 1 {
+		t.Fatalf("completed wizard fields still show input prompt:\n%s", plain)
 	}
 }
 
@@ -383,6 +385,98 @@ func TestWizardActiveEngineShowsChips(t *testing.T) {
 	plain := stripANSI(m.viewWizard())
 	if !strings.Contains(plain, "[Postgres]") {
 		t.Fatalf("active engine should show chip brackets:\n%s", plain)
+	}
+}
+
+func TestWizardDockedShowsDetailsAndWizard(t *testing.T) {
+	t.Parallel()
+	m := NewApp("/tmp", config.Config{EngineHealthInterval: time.Second})
+	m.width = 120
+	m.height = 32
+	m.mode = ModeWizard
+	m.wizard = newWizardModel("/tmp", "/tmp/instances", nil)
+	m.instances = []*core.DatabaseInstance{
+		{Name: "demo", EngineType: "postgres", Runtime: "docker", Status: core.StatusStopped},
+	}
+	m.selectedIndex = 0
+
+	plain := stripANSI(m.viewMain())
+	if !strings.Contains(plain, "Details & Config") {
+		t.Fatal("expected details panel title")
+	}
+	if !strings.Contains(plain, "demo") {
+		t.Fatal("expected selected instance name in details area")
+	}
+	if !strings.Contains(plain, "New Database Instance") {
+		t.Fatal("expected wizard in dock")
+	}
+}
+
+func TestWizardDockedFooterShowsWizardHints(t *testing.T) {
+	t.Parallel()
+	m := NewApp("/tmp", config.Config{EngineHealthInterval: time.Second})
+	m.width = 120
+	m.height = 32
+	m.mode = ModeWizard
+	m.wizard = newWizardModel("/tmp", "/tmp/instances", nil)
+
+	plain := stripANSI(m.viewMain())
+	if strings.Contains(plain, "[n]") && strings.Contains(plain, "New") {
+		t.Fatal("main [n] New shortcut should not appear while wizard is open")
+	}
+	if !strings.Contains(plain, "[Esc]") {
+		t.Fatal("expected wizard cancel hint in footer area")
+	}
+}
+
+func TestWizardScrollFollowsFocus(t *testing.T) {
+	t.Parallel()
+	w := newWizardModel("/tmp", "/tmp/instances", nil)
+	w.scrollViewport = viewport.New(60, 4)
+	w.maxReached = StepReview
+	w.setFocus(StepMemoryLimit)
+	if w.scrollViewport.YOffset == 0 {
+		t.Fatal("expected scroll offset > 0 when focusing late step in small viewport")
+	}
+}
+
+func TestWizardDockFixedHintsOutsideViewport(t *testing.T) {
+	t.Parallel()
+	m := NewApp("/tmp", config.Config{EngineHealthInterval: time.Second})
+	m.width = 80
+	m.height = 20
+	m.mode = ModeWizard
+	m.wizard = newWizardModel("/tmp", "/tmp/instances", nil)
+	m.wizard.maxReached = StepReview
+	m.wizard.step = StepReview
+
+	plain := stripANSI(m.viewMain())
+	if !strings.Contains(plain, "[Esc]") || !strings.Contains(plain, "All set!") {
+		t.Fatal("review hints should appear in dock/footer")
+	}
+}
+
+func TestViewWizardUsesMainLayout(t *testing.T) {
+	t.Parallel()
+	m := NewApp("/tmp", config.Config{EngineHealthInterval: time.Second})
+	m.width = 120
+	m.height = 32
+	m.mode = ModeWizard
+	m.wizard = newWizardModel("/tmp", "/tmp/instances", nil)
+	m.instances = []*core.DatabaseInstance{
+		{Name: "demo", EngineType: "postgres", Runtime: "docker"},
+	}
+	m.selectedIndex = 0
+
+	plain := stripANSI(m.View())
+	if !strings.Contains(plain, "LOCAL DATABASE MANAGER") {
+		t.Fatal("expected main header visible in wizard mode")
+	}
+	if !strings.Contains(plain, "New Database Instance") {
+		t.Fatal("expected wizard title in wizard mode")
+	}
+	if !strings.Contains(plain, "DB Instances") {
+		t.Fatal("expected left panel in wizard mode")
 	}
 }
 

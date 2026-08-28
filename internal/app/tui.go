@@ -266,7 +266,7 @@ func (m *AppModel) View() string {
 
 	switch m.mode {
 	case ModeWizard:
-		return m.wrapScreen(m.renderOverlay(m.viewWizard()))
+		return m.wrapScreen(m.viewMain())
 	case ModeLogs:
 		return m.wrapScreen(m.viewLogs())
 	case ModeHelp:

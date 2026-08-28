@@ -50,6 +50,42 @@ func TestMainSplitDoesNotWrap(t *testing.T) {
 	}
 }
 
+func TestSplitPanelHalfHeight(t *testing.T) {
+	t.Parallel()
+	top, bottom := splitPanelHalfHeight(20)
+	if top != 10 || bottom != 10 {
+		t.Fatalf("20 -> top=%d bottom=%d, want 10/10", top, bottom)
+	}
+	top, bottom = splitPanelHalfHeight(11)
+	if top != 5 || bottom != 6 {
+		t.Fatalf("11 -> top=%d bottom=%d, want 5/6", top, bottom)
+	}
+	top, bottom = splitPanelHalfHeight(6)
+	if top < 3 || bottom < 3 {
+		t.Fatalf("min heights: top=%d bottom=%d", top, bottom)
+	}
+}
+
+func TestWizardDockedRightColumnMatchesLeftHeight(t *testing.T) {
+	t.Parallel()
+	inner := 118
+	leftW, rightW, _ := splitPanelWidths(inner)
+	contentH := 27
+	leftBox := panelBoxStyle(true).Width(leftW).Height(contentH).Render("left")
+
+	// Single bordered right panel (not two stacked bordered panels).
+	rightInner := panelInnerWidth(rightW)
+	top, bottom := splitPanelHalfHeight(contentH - 1)
+	detailsBlock := lipgloss.NewStyle().Width(rightInner).Height(top).MaxHeight(top).Render("details")
+	wizardBlock := lipgloss.NewStyle().Width(rightInner).Height(bottom).MaxHeight(bottom).Render("wizard")
+	innerCol := lipgloss.JoinVertical(lipgloss.Left, detailsBlock, panelSeparator(rightInner), wizardBlock)
+	rightCol := ActivePanelStyle.Width(rightW).Height(contentH).Render(innerCol)
+
+	if lipgloss.Height(rightCol) != lipgloss.Height(leftBox) {
+		t.Fatalf("right height=%d left height=%d", lipgloss.Height(rightCol), lipgloss.Height(leftBox))
+	}
+}
+
 func TestPanelInnerWidthMatchesPadding(t *testing.T) {
 	t.Parallel()
 

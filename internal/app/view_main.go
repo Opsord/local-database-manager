@@ -248,6 +248,65 @@ func (m *AppModel) purgeInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
 	}
 }
 
+func (m *AppModel) buildRightDetailsContent(rightInner, rightWidth int) string {
+	inst := m.selectedInstance()
+	if inst == nil {
+		return surfaceLine(rightInner, MutedStyle.Render("Select an instance from the left list to view details."))
+	}
+	codeBoxWidth := rightInner - 16
+	if codeBoxWidth < 20 {
+		codeBoxWidth = 20
+	}
+
+	details := renderDetailRows(inst, rightWidth)
+	for i, row := range details {
+		details[i] = surfaceLine(rightInner, row)
+	}
+	details = append(details, surfaceBlankLine(rightInner))
+	details = append(details, surfaceLine(rightInner, detailField("URI:",
+		lipgloss.JoinHorizontal(lipgloss.Top,
+			URIBoxStyle.Render(truncateMiddle(inst.ConnectionURI(), codeBoxWidth)),
+			surfaceGap(1),
+			MutedStyle.Render("[c] copy"),
+		),
+	)))
+	details = append(details, surfaceLine(rightInner, detailField("CLI:",
+		CLIBoxStyle.Render(truncateMiddle(inst.CLICommand(), codeBoxWidth)),
+	)))
+	return lipgloss.JoinVertical(lipgloss.Left, details...)
+}
+
+func mainShortcutEntries() []string {
+	shortcut := func(key, desc string) string {
+		return lipgloss.JoinHorizontal(lipgloss.Top, KeyStyle.Render(key), surfaceGap(1), KeyDescStyle.Render(desc))
+	}
+	return []string{
+		shortcut("[↑/↓]", "Nav"),
+		shortcut("[Enter]", "Actions"),
+		shortcut("[/]", "Search"),
+		shortcut("[Space]", "Toggle"),
+		shortcut("[c]", "URI"),
+		shortcut("[l]", "Logs"),
+		shortcut("[d]", "Purge"),
+		shortcut("[n]", "New"),
+		shortcut("[?]", "Help"),
+		shortcut("[q]", "Quit"),
+	}
+}
+
+func wizardShortcutEntries() []string {
+	shortcut := func(key, desc string) string {
+		return lipgloss.JoinHorizontal(lipgloss.Top, KeyStyle.Render(key), surfaceGap(1), KeyDescStyle.Render(desc))
+	}
+	return []string{
+		shortcut("[↑↓]", "Rows"),
+		shortcut("[←→]", "Options"),
+		shortcut("[Enter]", "Next"),
+		shortcut("[b]", "Back"),
+		shortcut("[Esc]", "Cancel"),
+	}
+}
+
 func (m *AppModel) viewMain() string {
 	inner := screenInnerWidth(m.width)
 	leftWidth, rightWidth, gapW := splitPanelWidths(inner)
@@ -274,7 +333,6 @@ func (m *AppModel) viewMain() string {
 
 	var listItems []string
 	filteredList := m.filteredInstances()
-	inst := m.selectedInstance()
 
 	if m.isFiltering {
 		filterBox := FilterBoxStyle.
@@ -313,7 +371,7 @@ func (m *AppModel) viewMain() string {
 		leftTitle = fmt.Sprintf("Filter (%d/%d)", len(filteredList), len(m.instances))
 	}
 
-	leftBox := panelBoxStyle(true).
+	leftBox := panelBoxStyle(m.mode != ModeWizard).
 		Width(leftWidth).
 		Height(contentHeight).
 		Render(
@@ -324,46 +382,50 @@ func (m *AppModel) viewMain() string {
 			),
 		)
 
-	var rightContent string
-	if inst == nil {
-		rightContent = surfaceLine(rightInner, MutedStyle.Render("Select an instance from the left list to view details."))
-	} else {
-		codeBoxWidth := rightInner - 16
-		if codeBoxWidth < 20 {
-			codeBoxWidth = 20
-		}
+	detailsContent := m.buildRightDetailsContent(rightInner, rightWidth)
 
-		details := renderDetailRows(inst, rightWidth)
-		for i, row := range details {
-			details[i] = surfaceLine(rightInner, row)
-		}
-		details = append(details, surfaceBlankLine(rightInner))
-		details = append(details, surfaceLine(rightInner, detailField("URI:",
-			lipgloss.JoinHorizontal(lipgloss.Top,
-				URIBoxStyle.Render(truncateMiddle(inst.ConnectionURI(), codeBoxWidth)),
-				surfaceGap(1),
-				MutedStyle.Render("[c] copy"),
-			),
-		)))
-		details = append(details, surfaceLine(rightInner, detailField("CLI:",
-			CLIBoxStyle.Render(truncateMiddle(inst.CLICommand(), codeBoxWidth)),
-		)))
-		rightContent = lipgloss.JoinVertical(lipgloss.Left, details...)
-	}
-
-	rightBox := panelBoxStyle(false).
-		Width(rightWidth).
-		Height(contentHeight).
-		Render(
-			lipgloss.JoinVertical(
+	var rightColumn string
+	if m.mode == ModeWizard {
+		// One bordered panel for the whole right column. Two stacked bordered
+		// panels add an extra pair of borders and make the right side taller
+		// than the left, which shifts the layout and clips the header title.
+		detailsH, wizardH := splitPanelHalfHeight(contentHeight - 1) // -1 for separator
+		detailsBlock := lipgloss.NewStyle().
+			Width(rightInner).
+			Height(detailsH).
+			MaxHeight(detailsH).
+			Background(BgSurface).
+			Render(lipgloss.JoinVertical(
 				lipgloss.Left,
 				panelTitle("Details & Config", rightInner),
-				rightContent,
-			),
+				detailsContent,
+			))
+		wizardBlock := m.viewWizardDock(rightInner, wizardH)
+		rightInnerCol := lipgloss.JoinVertical(
+			lipgloss.Left,
+			detailsBlock,
+			panelSeparator(rightInner),
+			wizardBlock,
 		)
+		rightColumn = ActivePanelStyle.
+			Width(rightWidth).
+			Height(contentHeight).
+			Render(rightInnerCol)
+	} else {
+		rightColumn = panelBoxStyle(false).
+			Width(rightWidth).
+			Height(contentHeight).
+			Render(
+				lipgloss.JoinVertical(
+					lipgloss.Left,
+					panelTitle("Details & Config", rightInner),
+					detailsContent,
+				),
+			)
+	}
 
 	panelGap := lipgloss.NewStyle().Background(BgDark).Width(gapW).Render(" ")
-	mainSplit := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, panelGap, rightBox)
+	mainSplit := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, panelGap, rightColumn)
 
 	statusLine := m.statusMsg
 	if statusLine == "" {
@@ -375,20 +437,9 @@ func (m *AppModel) viewMain() string {
 		statusLine = lipgloss.NewStyle().Foreground(SecondaryColor).Background(BgSurface).Render(statusLine)
 	}
 
-	shortcut := func(key, desc string) string {
-		return lipgloss.JoinHorizontal(lipgloss.Top, KeyStyle.Render(key), surfaceGap(1), KeyDescStyle.Render(desc))
-	}
-	shortcuts := []string{
-		shortcut("[↑/↓]", "Nav"),
-		shortcut("[Enter]", "Actions"),
-		shortcut("[/]", "Search"),
-		shortcut("[Space]", "Toggle"),
-		shortcut("[c]", "URI"),
-		shortcut("[l]", "Logs"),
-		shortcut("[d]", "Purge"),
-		shortcut("[n]", "New"),
-		shortcut("[?]", "Help"),
-		shortcut("[q]", "Quit"),
+	shortcuts := mainShortcutEntries()
+	if m.mode == ModeWizard {
+		shortcuts = wizardShortcutEntries()
 	}
 	shortcutsBar := formatShortcutBar(inner-2, shortcuts)
 
