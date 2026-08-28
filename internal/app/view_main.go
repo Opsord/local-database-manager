@@ -196,7 +196,7 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			m.statusMsg = "Reloading instances and inspecting runtimes..."
 			m.statusIsErr = false
-			return m, m.reloadInstancesCmd()
+			return m, tea.Batch(m.reloadInstancesCmd(), m.checkEngineHealthCmd(false))
 		}
 	}
 

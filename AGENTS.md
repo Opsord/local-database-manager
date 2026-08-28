@@ -41,6 +41,7 @@ local-database-manager/
 │       ├── view_wizard.go           # Interactive new instance creation form modal
 │       └── view_logs.go             # Real-time container log streamer viewport
 │
+├── config.yml                       # App settings (engine health poll interval)
 ├── go.mod
 ├── go.sum
 └── README.md

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os/exec"
 	"path/filepath"
@@ -56,6 +57,8 @@ func (r *Runner) CheckEngineHealth(ctx context.Context, runtimeName string) Engi
 	defer cancel()
 
 	cmd := exec.CommandContext(cmdCtx, bin, "info")
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
 	if err := cmd.Run(); err != nil {
 		return EngineOffline
 	}

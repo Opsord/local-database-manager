@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"local-database-manager/internal/app"
+	"local-database-manager/internal/config"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -47,7 +48,13 @@ func hasEnginesAndInstances(dir string) bool {
 func main() {
 	projectRoot := findProjectRoot()
 
-	appModel := app.NewApp(projectRoot)
+	cfg, err := config.Load(projectRoot)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+		os.Exit(1)
+	}
+
+	appModel := app.NewApp(projectRoot, cfg)
 	p := tea.NewProgram(appModel, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	if _, err := p.Run(); err != nil {

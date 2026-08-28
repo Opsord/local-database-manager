@@ -79,6 +79,16 @@ func TestRunner_PodmanCompose(t *testing.T) {
 	}
 }
 
+func TestRunner_CheckEngineHealth_NotInstalled(t *testing.T) {
+	t.Parallel()
+	runner := NewRunner("/test/app")
+
+	got := runner.CheckEngineHealth(context.Background(), "nonexistent_runtime_binary_xyz")
+	if got != EngineNotInstalled {
+		t.Fatalf("CheckEngineHealth = %q, want %s", got, EngineNotInstalled)
+	}
+}
+
 func TestRunner_Start_OfflineError(t *testing.T) {
 	t.Parallel()
 	runner := NewRunner("/test/app")

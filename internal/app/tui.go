@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"local-database-manager/internal/config"
 	"local-database-manager/internal/core"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -31,11 +32,20 @@ type actionDoneMsg struct {
 	msg string
 }
 
+type engineHealthMsg struct {
+	dockerHealth core.EngineHealth
+	podmanHealth core.EngineHealth
+	scheduleTick bool
+}
+
+type engineHealthTickMsg struct{}
+
 // AppModel is the root Bubble Tea application state.
 type AppModel struct {
 	projectRoot  string
 	instancesDir string
 	runner       core.InstanceRunner
+	cfg          config.Config
 
 	mode          AppMode
 	instances     []*core.DatabaseInstance
@@ -64,7 +74,7 @@ type AppModel struct {
 }
 
 // NewApp instantiates a new AppModel.
-func NewApp(projectRoot string) *AppModel {
+func NewApp(projectRoot string, cfg config.Config) *AppModel {
 	instancesDir := filepath.Join(projectRoot, "instances")
 	runner := core.NewRunner(projectRoot)
 
@@ -72,6 +82,7 @@ func NewApp(projectRoot string) *AppModel {
 		projectRoot:  projectRoot,
 		instancesDir: instancesDir,
 		runner:       runner,
+		cfg:          cfg,
 		mode:         ModeMain,
 		logs: logsModel{
 			viewport: viewport.New(80, 20),
@@ -81,39 +92,51 @@ func NewApp(projectRoot string) *AppModel {
 
 // Init initializes the model, instantly loads instances and launches parallel inspections in background.
 func (m *AppModel) Init() tea.Cmd {
-	return m.reloadInstancesCmd()
+	return tea.Batch(m.reloadInstancesCmd(), m.checkEngineHealthCmd(true))
+}
+
+func (m *AppModel) checkEngineHealthCmd(scheduleTick bool) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		var wg sync.WaitGroup
+		var dockerHealth core.EngineHealth
+		var podmanHealth core.EngineHealth
+
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			dockerHealth = m.runner.CheckEngineHealth(ctx, "docker")
+		}()
+		go func() {
+			defer wg.Done()
+			podmanHealth = m.runner.CheckEngineHealth(ctx, "podman")
+		}()
+		wg.Wait()
+
+		return engineHealthMsg{
+			dockerHealth: dockerHealth,
+			podmanHealth: podmanHealth,
+			scheduleTick: scheduleTick,
+		}
+	}
+}
+
+func (m *AppModel) engineHealthTickCmd() tea.Cmd {
+	return tea.Tick(m.cfg.EngineHealthInterval, func(time.Time) tea.Msg {
+		return engineHealthTickMsg{}
+	})
 }
 
 func (m *AppModel) reloadInstancesCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 
-		// 1. Fast disk scan of instances (< 2ms)
 		instances, err := core.ScanInstances(m.instancesDir)
 		if err != nil {
 			return errMsg{err}
 		}
 
-		// 2. Parallelize runtime engine health checks + instance container checks
 		var wg sync.WaitGroup
-		var dockerHealth core.EngineHealth
-		var podmanHealth core.EngineHealth
-
-		// Check Docker Health
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			dockerHealth = m.runner.CheckEngineHealth(ctx, "docker")
-		}()
-
-		// Check Podman Health
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			podmanHealth = m.runner.CheckEngineHealth(ctx, "podman")
-		}()
-
-		// Check each instance status & memory concurrently
 		for _, inst := range instances {
 			wg.Add(1)
 			go func(i *core.DatabaseInstance) {
@@ -126,22 +149,14 @@ func (m *AppModel) reloadInstancesCmd() tea.Cmd {
 				}
 			}(inst)
 		}
-
-		// Wait for all concurrent routines to complete
 		wg.Wait()
 
-		return instancesLoadedMsg{
-			instances:    instances,
-			dockerHealth: dockerHealth,
-			podmanHealth: podmanHealth,
-		}
+		return instancesLoadedMsg{instances: instances}
 	}
 }
 
 type instancesLoadedMsg struct {
-	instances    []*core.DatabaseInstance
-	dockerHealth core.EngineHealth
-	podmanHealth core.EngineHealth
+	instances []*core.DatabaseInstance
 }
 
 type errMsg struct {
@@ -189,8 +204,9 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case instancesLoadedMsg:
 		m.instances = msg.instances
-		m.dockerHealth = msg.dockerHealth
-		m.podmanHealth = msg.podmanHealth
+		if m.statusMsg == "Reloading instances and inspecting runtimes..." {
+			m.statusMsg = ""
+		}
 
 		list := m.filteredInstances()
 		if m.selectedIndex >= len(list) {
@@ -200,6 +216,17 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selectedIndex = 0
 		}
 		return m, nil
+
+	case engineHealthMsg:
+		m.dockerHealth = msg.dockerHealth
+		m.podmanHealth = msg.podmanHealth
+		if msg.scheduleTick {
+			return m, m.engineHealthTickCmd()
+		}
+		return m, nil
+
+	case engineHealthTickMsg:
+		return m, m.checkEngineHealthCmd(true)
 
 	case actionDoneMsg:
 		m.statusMsg = msg.msg

@@ -46,11 +46,16 @@ local-database-manager/
 │   ├── core/                        # Domain logic (instance model, parser, ports, runner)
 │   └── app/                         # Bubble Tea UI presentation layer
 │
+├── config.yml                       # App settings (engine health poll interval)
 ├── go.mod
 ├── go.sum
 ├── AGENTS.md
 └── README.md
 ```
+
+## App config
+
+`config.yml` at the project root sets app knobs. Today the only key is `engine_health_interval` (Go duration, e.g. `5s`). Restart the TUI after changing it. Missing or invalid config prevents startup.
 
 ---
 
