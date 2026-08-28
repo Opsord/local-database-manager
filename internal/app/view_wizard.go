@@ -36,6 +36,8 @@ type wizardModel struct {
 
 	step wizardStep
 
+	maxReached wizardStep
+
 	selectedEngineIdx  int
 	selectedRuntimeIdx int
 
@@ -110,6 +112,7 @@ func newWizardModel(projectRoot, instancesDir string, existing []*core.DatabaseI
 		instancesDir:       instancesDir,
 		instances:          existing,
 		step:               StepEngine,
+		maxReached:         StepEngine,
 		selectedEngineIdx:  0,
 		selectedRuntimeIdx: 0,
 		engines:            engines,
@@ -118,6 +121,172 @@ func newWizardModel(projectRoot, instancesDir string, existing []*core.DatabaseI
 	}
 	w.blurAll()
 	return w
+}
+
+func (w *wizardModel) setFocus(step wizardStep) {
+	if step < StepEngine {
+		step = StepEngine
+	}
+	if step > w.maxReached {
+		step = w.maxReached
+	}
+	w.step = step
+	w.blurAll()
+	if step >= StepName && step <= StepMemoryLimit {
+		w.focusInput(int(step) - int(StepName))
+	}
+}
+
+func (w *wizardModel) moveFocus(delta int) {
+	w.setFocus(w.step + wizardStep(delta))
+}
+
+func (w *wizardModel) cycleOption(delta int) {
+	switch w.step {
+	case StepEngine:
+		n := w.selectedEngineIdx + delta
+		if n < 0 {
+			n = 0
+		}
+		if n >= len(w.engines) {
+			n = len(w.engines) - 1
+		}
+		w.selectedEngineIdx = n
+	case StepRuntime:
+		n := w.selectedRuntimeIdx + delta
+		if n < 0 {
+			n = 0
+		}
+		if n >= len(w.runtimes) {
+			n = len(w.runtimes) - 1
+		}
+		w.selectedRuntimeIdx = n
+	}
+}
+
+func (w *wizardModel) confirmAdvance() bool {
+	switch w.step {
+	case StepEngine:
+		w.maxReached = maxStep(w.maxReached, StepRuntime)
+		w.setFocus(StepRuntime)
+		return true
+	case StepRuntime:
+		w.maxReached = maxStep(w.maxReached, StepName)
+		w.setFocus(StepName)
+		return true
+	case StepName:
+		if strings.TrimSpace(w.inputs[0].Value()) == "" {
+			return false
+		}
+		w.applyNameAutofill()
+		w.maxReached = maxStep(w.maxReached, StepContainerName)
+		w.setFocus(StepContainerName)
+		return true
+	case StepContainerName:
+		w.maxReached = maxStep(w.maxReached, StepPort)
+		w.setFocus(StepPort)
+		return true
+	case StepPort:
+		w.maxReached = maxStep(w.maxReached, StepDatabase)
+		w.setFocus(StepDatabase)
+		return true
+	case StepDatabase:
+		w.maxReached = maxStep(w.maxReached, StepVolume)
+		w.setFocus(StepVolume)
+		return true
+	case StepVolume:
+		w.maxReached = maxStep(w.maxReached, StepPassword)
+		w.setFocus(StepPassword)
+		return true
+	case StepPassword:
+		w.maxReached = maxStep(w.maxReached, StepMemoryLimit)
+		w.setFocus(StepMemoryLimit)
+		return true
+	case StepMemoryLimit:
+		w.maxReached = maxStep(w.maxReached, StepReview)
+		w.setFocus(StepReview)
+		return true
+	default:
+		return false
+	}
+}
+
+func maxStep(a, b wizardStep) wizardStep {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func (w *wizardModel) applyNameAutofill() {
+	name := strings.TrimSpace(w.inputs[0].Value())
+	engine := w.engines[w.selectedEngineIdx]
+
+	prefix, volPrefix, defaultPort, defaultPass, defaultMem := engineDefaults(engine)
+
+	if w.inputs[1].Value() == "" {
+		w.inputs[1].SetValue(fmt.Sprintf("%s-%s", prefix, name))
+	}
+	if w.inputs[2].Value() == "" || w.inputs[2].Value() == "5432" {
+		freePort := core.FindNextFreePort(mustAtoi(defaultPort), w.instances)
+		w.inputs[2].SetValue(strconv.Itoa(freePort))
+	}
+	if w.inputs[3].Value() == "" {
+		w.inputs[3].SetValue(fmt.Sprintf("%s_db", name))
+	}
+	if w.inputs[4].Value() == "" {
+		w.inputs[4].SetValue(fmt.Sprintf("%s_%s", volPrefix, name))
+	}
+	if w.inputs[5].Value() == "" || w.inputs[5].Value() == "postgres" {
+		w.inputs[5].SetValue(defaultPass)
+	}
+	if w.inputs[6].Value() == "" || w.inputs[6].Value() == "512M" {
+		w.inputs[6].SetValue(defaultMem)
+	}
+}
+
+func engineDefaults(engine string) (prefix, volPrefix, port, pass, mem string) {
+	if engine == "sqlserver" {
+		return "sql", "sqlserver", "1433", "SuperPassword123!", "2G"
+	}
+	return "pg", "pgdata", "5432", "postgres", "512M"
+}
+
+func (w *wizardModel) applyEngineDefaults(prevEngine, nextEngine string) {
+	if prevEngine == nextEngine {
+		return
+	}
+	name := strings.TrimSpace(w.inputs[0].Value())
+	prevP, prevV, prevPort, prevPass, prevMem := engineDefaults(prevEngine)
+	nextP, nextV, nextPort, nextPass, nextMem := engineDefaults(nextEngine)
+
+	if name != "" {
+		oldCont := fmt.Sprintf("%s-%s", prevP, name)
+		newCont := fmt.Sprintf("%s-%s", nextP, name)
+		if w.inputs[1].Value() == oldCont {
+			w.inputs[1].SetValue(newCont)
+		}
+		oldVol := fmt.Sprintf("%s_%s", prevV, name)
+		newVol := fmt.Sprintf("%s_%s", nextV, name)
+		if w.inputs[4].Value() == oldVol {
+			w.inputs[4].SetValue(newVol)
+		}
+	}
+	if w.inputs[2].Value() == prevPort {
+		free := core.FindNextFreePort(mustAtoi(nextPort), w.instances)
+		w.inputs[2].SetValue(strconv.Itoa(free))
+	}
+	if w.inputs[5].Value() == prevPass {
+		w.inputs[5].SetValue(nextPass)
+	}
+	if w.inputs[6].Value() == prevMem {
+		w.inputs[6].SetValue(nextMem)
+	}
+}
+
+func mustAtoi(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
 }
 
 func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -133,93 +302,7 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "enter":
-			switch w.step {
-			case StepEngine:
-				w.step = StepRuntime
-				w.blurAll()
-				return m, nil
-
-			case StepRuntime:
-				w.step = StepName
-				w.focusInput(0)
-				return m, nil
-
-			case StepName:
-				name := strings.TrimSpace(w.inputs[0].Value())
-				if name == "" {
-					return m, nil
-				}
-				engine := w.engines[w.selectedEngineIdx]
-
-				prefix := "pg"
-				defaultPort := 5432
-				defaultPass := "postgres"
-				defaultMem := "512M"
-				volPrefix := "pgdata"
-
-				if engine == "sqlserver" {
-					prefix = "sql"
-					defaultPort = 1433
-					defaultPass = "SuperPassword123!"
-					defaultMem = "2G"
-					volPrefix = "sqlserver"
-				}
-
-				if w.inputs[1].Value() == "" {
-					w.inputs[1].SetValue(fmt.Sprintf("%s-%s", prefix, name))
-				}
-				if w.inputs[2].Value() == "" || w.inputs[2].Value() == "5432" {
-					freePort := core.FindNextFreePort(defaultPort, w.instances)
-					w.inputs[2].SetValue(strconv.Itoa(freePort))
-				}
-				if w.inputs[3].Value() == "" {
-					w.inputs[3].SetValue(fmt.Sprintf("%s_db", name))
-				}
-				if w.inputs[4].Value() == "" {
-					w.inputs[4].SetValue(fmt.Sprintf("%s_%s", volPrefix, name))
-				}
-				if w.inputs[5].Value() == "" || w.inputs[5].Value() == "postgres" {
-					w.inputs[5].SetValue(defaultPass)
-				}
-				if w.inputs[6].Value() == "" || w.inputs[6].Value() == "512M" {
-					w.inputs[6].SetValue(defaultMem)
-				}
-
-				w.step = StepContainerName
-				w.focusInput(1)
-				return m, nil
-
-			case StepContainerName:
-				w.step = StepPort
-				w.focusInput(2)
-				return m, nil
-
-			case StepPort:
-				w.step = StepDatabase
-				w.focusInput(3)
-				return m, nil
-
-			case StepDatabase:
-				w.step = StepVolume
-				w.focusInput(4)
-				return m, nil
-
-			case StepVolume:
-				w.step = StepPassword
-				w.focusInput(5)
-				return m, nil
-
-			case StepPassword:
-				w.step = StepMemoryLimit
-				w.focusInput(6)
-				return m, nil
-
-			case StepMemoryLimit:
-				w.step = StepReview
-				w.blurAll()
-				return m, nil
-
-			case StepReview:
+			if w.step == StepReview {
 				if err := w.saveInstance(); err != nil {
 					m.statusMsg = fmt.Sprintf("Error saving instance: %v", err)
 					m.statusIsErr = true
@@ -232,22 +315,49 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusIsErr = false
 				return m, m.reloadInstancesCmd()
 			}
+			_ = w.confirmAdvance()
+			return m, nil
 
 		case "up", "k":
-			if w.step == StepEngine && w.selectedEngineIdx > 0 {
-				w.selectedEngineIdx--
-			} else if w.step == StepRuntime && w.selectedRuntimeIdx > 0 {
-				w.selectedRuntimeIdx--
-			}
+			w.moveFocus(-1)
 			return m, nil
 
 		case "down", "j":
-			if w.step == StepEngine && w.selectedEngineIdx < len(w.engines)-1 {
-				w.selectedEngineIdx++
-			} else if w.step == StepRuntime && w.selectedRuntimeIdx < len(w.runtimes)-1 {
-				w.selectedRuntimeIdx++
+			w.moveFocus(1)
+			return m, nil
+
+		case "left", "h":
+			prev := w.engines[w.selectedEngineIdx]
+			w.cycleOption(-1)
+			if w.step == StepEngine {
+				w.applyEngineDefaults(prev, w.engines[w.selectedEngineIdx])
 			}
 			return m, nil
+
+		case "right", "l":
+			prev := w.engines[w.selectedEngineIdx]
+			w.cycleOption(1)
+			if w.step == StepEngine {
+				w.applyEngineDefaults(prev, w.engines[w.selectedEngineIdx])
+			}
+			return m, nil
+
+		case "b":
+			if w.step > StepEngine {
+				w.moveFocus(-1)
+			}
+			return m, nil
+
+		case "backspace":
+			if w.step >= StepName && w.step <= StepMemoryLimit {
+				idx := int(w.step) - int(StepName)
+				if w.inputs[idx].Value() == "" {
+					if w.step > StepEngine {
+						w.moveFocus(-1)
+					}
+					return m, nil
+				}
+			}
 		}
 	}
 
@@ -356,22 +466,24 @@ func (m *AppModel) viewWizard() string {
 		surfaceBlankLine(inner),
 	}
 
-	if w.step == StepEngine {
-		parts := []string{LabelStyle.Render("1. Engine:")}
-		for i, eng := range w.engines {
-			label := engineDisplay(eng)
-			if i == w.selectedEngineIdx {
-				parts = append(parts, SelectedItemStyle.Render(fmt.Sprintf(" [%s] ", label)))
-			} else {
-				parts = append(parts, NormalItemStyle.Render(fmt.Sprintf(" %s ", label)))
+	if w.maxReached >= StepEngine {
+		if w.step == StepEngine {
+			parts := []string{LabelStyle.Render("1. Engine:")}
+			for i, eng := range w.engines {
+				label := engineDisplay(eng)
+				if i == w.selectedEngineIdx {
+					parts = append(parts, SelectedItemStyle.Render(fmt.Sprintf(" [%s] ", label)))
+				} else {
+					parts = append(parts, NormalItemStyle.Render(fmt.Sprintf(" %s ", label)))
+				}
 			}
+			content = append(content, row(parts...))
+		} else {
+			content = append(content, row(LabelStyle.Render("1. Engine:"), ValueHighlightStyle.Render(engineDisplay(w.engines[w.selectedEngineIdx]))))
 		}
-		content = append(content, row(parts...))
-	} else {
-		content = append(content, row(LabelStyle.Render("1. Engine:"), ValueHighlightStyle.Render(engineDisplay(w.engines[w.selectedEngineIdx]))))
 	}
 
-	if w.step >= StepRuntime {
+	if w.maxReached >= StepRuntime {
 		if w.step == StepRuntime {
 			parts := []string{LabelStyle.Render("2. Runtime:")}
 			for i, r := range w.runtimes {
@@ -388,25 +500,25 @@ func (m *AppModel) viewWizard() string {
 		}
 	}
 
-	if w.step >= StepName {
+	if w.maxReached >= StepName {
 		content = append(content, m.wizardValueRow(inner, "3. Name:", truncateEnd(w.inputs[0].Value(), inputWidth), 0, ""))
 	}
-	if w.step >= StepContainerName {
+	if w.maxReached >= StepContainerName {
 		content = append(content, m.wizardValueRow(inner, "4. Container:", truncateEnd(w.inputs[1].Value(), inputWidth), 1, ""))
 	}
-	if w.step >= StepPort {
+	if w.maxReached >= StepPort {
 		content = append(content, m.wizardValueRow(inner, "5. Port:", truncateEnd(w.inputs[2].Value(), inputWidth), 2, ""))
 	}
-	if w.step >= StepDatabase {
+	if w.maxReached >= StepDatabase {
 		content = append(content, m.wizardValueRow(inner, "6. Database:", truncateEnd(w.inputs[3].Value(), inputWidth), 3, ""))
 	}
-	if w.step >= StepVolume {
+	if w.maxReached >= StepVolume {
 		content = append(content, m.wizardValueRow(inner, "7. Volume:", truncateEnd(w.inputs[4].Value(), inputWidth), 4, ""))
 	}
-	if w.step >= StepPassword {
+	if w.maxReached >= StepPassword {
 		content = append(content, m.wizardValueRow(inner, "8. Password:", truncateEnd(w.inputs[5].Value(), inputWidth), 5, ""))
 	}
-	if w.step >= StepMemoryLimit {
+	if w.maxReached >= StepMemoryLimit {
 		recommendation := "(Recommended: 512M - 1G)"
 		if w.engines[w.selectedEngineIdx] == "sqlserver" {
 			recommendation = "(Recommended: 2G min for MSSQL)"
@@ -416,9 +528,9 @@ func (m *AppModel) viewWizard() string {
 
 	content = append(content, surfaceBlankLine(inner))
 	if w.step == StepReview {
-		content = append(content, surfaceLine(inner, RunningStyle.Render("All set! Press [Enter] to create the instance or [Esc] to cancel.")))
+		content = append(content, surfaceLine(inner, RunningStyle.Render("All set! Press [Enter] to create the instance, [↑/b] to edit, or [Esc] to cancel.")))
 	} else {
-		content = append(content, surfaceLine(inner, MutedStyle.Render("Press [Enter] to advance, [↑/↓] for options, [Esc] to cancel.")))
+		content = append(content, surfaceLine(inner, MutedStyle.Render("[↑↓] rows  [←→] options  [Enter] next  [b] back  [Esc] cancel")))
 	}
 
 	return ActivePanelStyle.
