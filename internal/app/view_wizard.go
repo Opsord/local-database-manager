@@ -671,9 +671,15 @@ func (w *wizardModel) bodyLineForStep(step wizardStep) int {
 	}
 	line := 0
 	for s := StepEngine; s <= focusStep; s++ {
+		if s == StepVersion && !w.isPostgres() {
+			continue
+		}
 		if s <= w.maxReached {
 			line++
 		}
+	}
+	if focusStep >= StepPassword && w.maxReached >= StepDatabase {
+		line++
 	}
 	if line == 0 {
 		return 0
@@ -829,11 +835,7 @@ func (m *AppModel) buildWizardBodyRows(inner, inputWidth int) string {
 		content = append(content, m.wizardValueRow(inner, dbLabel, truncateEnd(w.inputs[3].Value(), inputWidth), 3, ""))
 	}
 	if w.maxReached >= StepDatabase {
-		volLabel := "Volume:"
-		if w.isPostgres() && w.maxReached >= StepVersion {
-			volLabel = "  Volume:"
-		}
-		content = append(content, m.wizardPreviewRow(inner, volLabel, truncateEnd(w.derivedVolume(), inputWidth)))
+		content = append(content, m.wizardPreviewRow(inner, "Volume:", truncateEnd(w.derivedVolume(), inputWidth)))
 	}
 	if w.maxReached >= StepPassword {
 		content = append(content, m.wizardValueRow(inner, passLabel, truncateEnd(w.inputs[4].Value(), inputWidth), 4, ""))

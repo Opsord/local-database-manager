@@ -521,6 +521,36 @@ func TestWizardScrollFollowsFocus(t *testing.T) {
 	}
 }
 
+func TestWizardBodyLineForStepMatchesRenderedRows(t *testing.T) {
+	t.Parallel()
+
+	t.Run("postgres password is two lines after database", func(t *testing.T) {
+		t.Parallel()
+		w := newWizardModel("/tmp", "/tmp/instances", nil)
+		w.maxReached = StepReview
+		w.selectedEngineIdx = 0 // postgres
+
+		dbLine := w.bodyLineForStep(StepDatabase)
+		passLine := w.bodyLineForStep(StepPassword)
+		if got := passLine - dbLine; got != 2 {
+			t.Fatalf("password line %d - database line %d = %d, want 2 (database row + volume preview)", passLine, dbLine, got)
+		}
+	})
+
+	t.Run("sqlserver skips version row", func(t *testing.T) {
+		t.Parallel()
+		w := newWizardModel("/tmp", "/tmp/instances", nil)
+		w.maxReached = StepReview
+		w.selectedEngineIdx = 1 // sqlserver
+
+		runtimeLine := w.bodyLineForStep(StepRuntime)
+		nameLine := w.bodyLineForStep(StepName)
+		if got := nameLine - runtimeLine; got != 1 {
+			t.Fatalf("name line %d - runtime line %d = %d, want 1 (version step not rendered)", nameLine, runtimeLine, got)
+		}
+	})
+}
+
 func TestWizardDockFixedHintsOutsideViewport(t *testing.T) {
 	t.Parallel()
 	m := NewApp("/tmp", config.Config{EngineHealthInterval: time.Second})
