@@ -15,6 +15,7 @@ A lightweight, high-performance interactive Terminal User Interface (TUI) built 
 - 📋 **One-Key Connection Copy:** Copy standard connection URIs (`postgresql://...`, `sqlserver://...`) directly to the clipboard with `c`.
 - 📦 **Backend .env Block Export (`E` / `x`):** Copy a complete multi-variable configuration block formatted ready to paste into backend projects.
 - 🪄 **Interactive Creation Wizard (`n`):** Step-by-step form to spin up new database instances with automatic free port detection.
+- 📦 **Postgres Version Selection:** Choose majors 14–18 in the create/edit wizard; volumes are auto-named (`pgdata_<name>_<version>`).
 - ✏️ **In-TUI Edit Instance:** Docked wizard (via Action Menu) to edit all instance fields; `[o]` opens external editor; saving while running prompts restart (`y`/`n`).
 - 📜 **Real-time Log Streamer (`l`):** Fullscreen live container logs viewport with smooth scrolling.
 - 🧹 **Safe Volume Purge (`d`):** Destroy container and associated data volumes with confirmation.
