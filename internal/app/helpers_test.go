@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"local-database-manager/internal/core"
+
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
@@ -104,6 +106,35 @@ func TestRenderOverlayPaintsWhitespace(t *testing.T) {
 	out := m.renderOverlay("X")
 	if !strings.Contains(out, "48;2;1;22;39") {
 		t.Fatalf("overlay whitespace missing BgDark: %q", out)
+	}
+}
+
+func TestRenderDetailRowsIncludesPostgresVersion(t *testing.T) {
+	t.Parallel()
+	inst := &core.DatabaseInstance{
+		EngineType: "postgres",
+		Runtime:    "docker",
+		Version:    "16",
+		Volume:     "pgdata_shop_16",
+	}
+	rows := renderDetailRows(inst, 120)
+	plain := stripANSI(strings.Join(rows, "\n"))
+	if !strings.Contains(plain, "Version:") || !strings.Contains(plain, "16") {
+		t.Fatalf("expected Version row, got:\n%s", plain)
+	}
+}
+
+func TestRenderDetailRowsOmitsVersionForSQLServer(t *testing.T) {
+	t.Parallel()
+	inst := &core.DatabaseInstance{
+		EngineType: "sqlserver",
+		Runtime:    "docker",
+		Volume:     "sqlserver_shop",
+	}
+	rows := renderDetailRows(inst, 120)
+	plain := stripANSI(strings.Join(rows, "\n"))
+	if strings.Contains(plain, "Version:") {
+		t.Fatalf("SQL Server details should omit Version, got:\n%s", plain)
 	}
 }
 

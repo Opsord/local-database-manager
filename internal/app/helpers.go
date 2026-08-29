@@ -186,6 +186,17 @@ func renderDetailRows(inst *core.DatabaseInstance, panelWidth int) []string {
 		value string
 	}{
 		{"Engine:", ValueHighlightStyle.Render(engineDesc)},
+	}
+	if inst.EngineType == "postgres" {
+		fields = append(fields, struct {
+			label string
+			value string
+		}{"Version:", ValueStyle.Render(inst.Version)})
+	}
+	fields = append(fields, []struct {
+		label string
+		value string
+	}{
 		{"Container:", ValueStyle.Render(truncateEnd(inst.ContainerName, panelWidth-20))},
 		{"Status:", statusFormatted},
 		{"Memory:", ValueStyle.Render(memFormatted)},
@@ -195,7 +206,7 @@ func renderDetailRows(inst *core.DatabaseInstance, panelWidth int) []string {
 		{"Schema:", ValueStyle.Render(inst.Schema)},
 		{"Volume:", ValueStyle.Render(truncateEnd(inst.Volume, panelWidth-20))},
 		{"Project:", ValueStyle.Render(truncateEnd(inst.ProjectName, panelWidth-20))},
-	}
+	}...)
 
 	if panelWidth < 70 {
 		rows := make([]string, 0, len(fields))

@@ -50,6 +50,7 @@ type wizardModel struct {
 	sourceProjectName   string
 	sourceContainerName string
 	sourceEngine        string
+	sourceVolume        string
 	wasRunning          bool
 
 	step wizardStep
@@ -190,6 +191,7 @@ func newEditWizardModel(projectRoot, instancesDir string, existing []*core.Datab
 	w.sourceProjectName = inst.ProjectName
 	w.sourceContainerName = inst.ContainerName
 	w.sourceEngine = inst.EngineType
+	w.sourceVolume = inst.Volume
 	w.wasRunning = inst.Status == core.StatusReady || inst.Status == core.StatusStarting
 
 	for i, e := range w.engines {
@@ -482,6 +484,9 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 
+				newVolume := w.derivedVolume()
+				volumeChanged := w.kind == wizardEdit && w.sourceVolume != newVolume
+
 				if w.kind == wizardEdit && w.wasRunning {
 					m.clearConfirms()
 					m.confirmRestartAfterEdit = true
@@ -491,14 +496,22 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.pendingDeleteEnvPath = oldInst.EnvFilePath
 					}
 					m.mode = ModeMain
-					m.statusMsg = "Saved. Restart container with new config? Press 'y' to confirm, 'n' to cancel"
+					if volumeChanged {
+						m.statusMsg = fmt.Sprintf("Saved (volume → %s; old volume kept). Restart container with new config? Press 'y' to confirm, 'n' to cancel", newVolume)
+					} else {
+						m.statusMsg = "Saved. Restart container with new config? Press 'y' to confirm, 'n' to cancel"
+					}
 					m.statusIsErr = true
 					return m, m.reloadInstancesCmd()
 				}
 
 				m.mode = ModeMain
 				if w.kind == wizardEdit {
-					m.statusMsg = fmt.Sprintf("Instance '%s' saved", name)
+					if volumeChanged {
+						m.statusMsg = fmt.Sprintf("Volume will change to %s. Previous volume %s is kept until you Purge it.", newVolume, w.sourceVolume)
+					} else {
+						m.statusMsg = fmt.Sprintf("Instance '%s' saved", name)
+					}
 				} else {
 					m.statusMsg = fmt.Sprintf("Instance '%s' created successfully!", name)
 				}

@@ -1036,3 +1036,111 @@ POSTGRES_VOLUME=v
 		t.Fatal("expected error status")
 	}
 }
+
+func TestEditWizardPreloadsPostgresVersion(t *testing.T) {
+	t.Parallel()
+	inst := &core.DatabaseInstance{
+		Name: "shop", EngineType: "postgres", Runtime: "docker",
+		ContainerName: "pg-shop", Port: 5432, Database: "db",
+		Password: "p", Volume: "pgdata_shop_16", MemoryLimit: "512M",
+		Version: "16", EnvFilePath: "/tmp/shop.env",
+	}
+	w := newEditWizardModel("/tmp", "/tmp", nil, inst)
+	if w.selectedVersion() != "16" {
+		t.Fatalf("version=%q", w.selectedVersion())
+	}
+}
+
+func TestEditSaveWarnsWhenVolumeChanges(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	oldPath := filepath.Join(dir, "shop.env")
+	old := `ENGINE=postgres
+RUNTIME=docker
+CONTAINER_NAME=pg-shop
+COMPOSE_PROJECT_NAME=pg-shop
+MEMORY_LIMIT=512M
+POSTGRES_VERSION=16
+POSTGRES_PORT=5432
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=p
+POSTGRES_DB=db
+POSTGRES_SCHEMA=public
+POSTGRES_VOLUME=pgdata_shop_16
+`
+	if err := os.WriteFile(oldPath, []byte(old), 0644); err != nil {
+		t.Fatal(err)
+	}
+	inst, err := core.ParseEnvFile(oldPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := NewApp(dir, config.Config{EngineHealthInterval: time.Second})
+	m.instancesDir = dir
+	m.wizard = newEditWizardModel(dir, dir, []*core.DatabaseInstance{inst}, inst)
+	m.mode = ModeWizard
+	for i, v := range core.PostgresVersions {
+		if v == "18" {
+			m.wizard.selectedVersionIdx = i
+			break
+		}
+	}
+	m.wizard.step = StepReview
+	m.wizard.maxReached = StepReview
+	_, cmd := m.updateWizard(tea.KeyMsg{Type: tea.KeyEnter})
+	_ = cmd
+	if !strings.Contains(m.statusMsg, "pgdata_shop_18") || !strings.Contains(m.statusMsg, "pgdata_shop_16") {
+		t.Fatalf("expected volume change warning, got %q", m.statusMsg)
+	}
+}
+
+func TestEditSaveVolumeChangeWhileRunningCombinedRestartStatus(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	oldPath := filepath.Join(dir, "shop.env")
+	old := `ENGINE=postgres
+RUNTIME=docker
+CONTAINER_NAME=pg-shop
+COMPOSE_PROJECT_NAME=pg-shop
+MEMORY_LIMIT=512M
+POSTGRES_VERSION=16
+POSTGRES_PORT=5432
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=p
+POSTGRES_DB=db
+POSTGRES_SCHEMA=public
+POSTGRES_VOLUME=pgdata_shop_16
+`
+	if err := os.WriteFile(oldPath, []byte(old), 0644); err != nil {
+		t.Fatal(err)
+	}
+	inst, err := core.ParseEnvFile(oldPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst.Status = core.StatusReady
+
+	m := NewApp(dir, config.Config{EngineHealthInterval: time.Second})
+	m.instancesDir = dir
+	m.wizard = newEditWizardModel(dir, dir, []*core.DatabaseInstance{inst}, inst)
+	m.mode = ModeWizard
+	for i, v := range core.PostgresVersions {
+		if v == "18" {
+			m.wizard.selectedVersionIdx = i
+			break
+		}
+	}
+	m.wizard.step = StepReview
+	m.wizard.maxReached = StepReview
+	_, _ = m.updateWizard(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if !m.confirmRestartAfterEdit {
+		t.Fatal("expected restart confirm armed")
+	}
+	if !strings.Contains(m.statusMsg, "pgdata_shop_18") || !strings.Contains(m.statusMsg, "old volume kept") {
+		t.Fatalf("expected combined volume restart status, got %q", m.statusMsg)
+	}
+	if !strings.Contains(m.statusMsg, "Restart container with new config?") {
+		t.Fatalf("expected restart prompt in status, got %q", m.statusMsg)
+	}
+}
