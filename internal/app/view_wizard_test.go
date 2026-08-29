@@ -85,9 +85,8 @@ func reviewModel(width, height int) *AppModel {
 	m.wizard.inputs[1].SetValue("pg-this-is-a-very-long-container-name-that-will-overflow")
 	m.wizard.inputs[2].SetValue("5433")
 	m.wizard.inputs[3].SetValue("shop_db")
-	m.wizard.inputs[4].SetValue("pgdata_shop")
-	m.wizard.inputs[5].SetValue("s3cretPass")
-	m.wizard.inputs[6].SetValue("512M")
+	m.wizard.inputs[4].SetValue("s3cretPass")
+	m.wizard.inputs[5].SetValue("512M")
 	return m
 }
 
@@ -102,6 +101,81 @@ func TestWizardNewModelStartsAtEngine(t *testing.T) {
 	}
 	if w.maxReached != StepEngine {
 		t.Fatalf("maxReached = %v, want StepEngine", w.maxReached)
+	}
+}
+
+func TestWizardDerivedVolumeIncludesVersion(t *testing.T) {
+	t.Parallel()
+	w := newWizardModel("/tmp", "/tmp", nil)
+	w.selectedEngineIdx = 0 // postgres
+	for i, v := range core.PostgresVersions {
+		if v == "16" {
+			w.selectedVersionIdx = i
+			break
+		}
+	}
+	w.inputs[0].SetValue("shop")
+	if got := w.derivedVolume(); got != "pgdata_shop_16" {
+		t.Fatalf("derivedVolume=%q", got)
+	}
+}
+
+func TestWizardSaveWritesPostgresVersionAndVolume(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	w := newWizardModel("/tmp", dir, nil)
+	w.selectedEngineIdx = 0
+	for i, v := range core.PostgresVersions {
+		if v == "15" {
+			w.selectedVersionIdx = i
+			break
+		}
+	}
+	w.inputs[0].SetValue("shop")
+	w.inputs[1].SetValue("pg-shop")
+	w.inputs[2].SetValue("5432")
+	w.inputs[3].SetValue("shop_db")
+	w.inputs[4].SetValue("secret")
+	w.inputs[5].SetValue("512M")
+	if err := w.saveInstance(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "shop.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if !strings.Contains(s, "POSTGRES_VERSION=15") {
+		t.Fatalf("missing version: %s", s)
+	}
+	if !strings.Contains(s, "POSTGRES_VOLUME=pgdata_shop_15") {
+		t.Fatalf("missing volume: %s", s)
+	}
+}
+
+func TestWizardSkipsVersionForSQLServer(t *testing.T) {
+	t.Parallel()
+	w := newWizardModel("/tmp", "/tmp", nil)
+	w.step = StepRuntime
+	w.selectedEngineIdx = 1 // sqlserver
+	if !w.confirmAdvance() {
+		t.Fatal("runtime confirm")
+	}
+	if w.step != StepName {
+		t.Fatalf("sqlserver should skip Version, got step %v", w.step)
+	}
+}
+
+func TestWizardPostgresRuntimeGoesToVersion(t *testing.T) {
+	t.Parallel()
+	w := newWizardModel("/tmp", "/tmp", nil)
+	w.step = StepRuntime
+	w.selectedEngineIdx = 0
+	if !w.confirmAdvance() {
+		t.Fatal("runtime confirm")
+	}
+	if w.step != StepVersion {
+		t.Fatalf("want StepVersion, got %v", w.step)
 	}
 }
 
@@ -167,9 +241,8 @@ func TestWizardApplyEngineDefaultsOnlyWhenStillDefault(t *testing.T) {
 	w.inputs[1].SetValue("pg-shop")
 	w.inputs[2].SetValue("5432")
 	w.inputs[3].SetValue("shop_db")
-	w.inputs[4].SetValue("pgdata_shop")
-	w.inputs[5].SetValue("postgres")
-	w.inputs[6].SetValue("512M")
+	w.inputs[4].SetValue("postgres")
+	w.inputs[5].SetValue("512M")
 	w.selectedEngineIdx = 0
 
 	w.applyEngineDefaults("postgres", "sqlserver")
@@ -182,14 +255,14 @@ func TestWizardApplyEngineDefaultsOnlyWhenStillDefault(t *testing.T) {
 	if w.inputs[2].Value() != wantPort {
 		t.Fatalf("port = %q, want %s", w.inputs[2].Value(), wantPort)
 	}
-	if w.inputs[4].Value() != "sqlserver_shop" {
-		t.Fatalf("volume = %q, want sqlserver_shop", w.inputs[4].Value())
+	if w.derivedVolume() != "sqlserver_shop" {
+		t.Fatalf("volume = %q, want sqlserver_shop", w.derivedVolume())
 	}
-	if w.inputs[5].Value() != "SuperPassword123!" {
-		t.Fatalf("password = %q", w.inputs[5].Value())
+	if w.inputs[4].Value() != "SuperPassword123!" {
+		t.Fatalf("password = %q", w.inputs[4].Value())
 	}
-	if w.inputs[6].Value() != "2G" {
-		t.Fatalf("memory = %q, want 2G", w.inputs[6].Value())
+	if w.inputs[5].Value() != "2G" {
+		t.Fatalf("memory = %q, want 2G", w.inputs[5].Value())
 	}
 	if w.inputs[3].Value() != "shop_db" {
 		t.Fatalf("database should stay %q", w.inputs[3].Value())
@@ -202,18 +275,15 @@ func TestWizardApplyEngineDefaultsSkipsEditedFields(t *testing.T) {
 	w.inputs[0].SetValue("shop")
 	w.inputs[1].SetValue("custom-box")
 	w.inputs[2].SetValue("5555")
-	w.inputs[4].SetValue("custom_vol")
-	w.inputs[5].SetValue("my-secret")
-	w.inputs[6].SetValue("1G")
+	w.inputs[4].SetValue("my-secret")
+	w.inputs[5].SetValue("1G")
 
 	w.applyEngineDefaults("postgres", "sqlserver")
 
 	if w.inputs[1].Value() != "custom-box" || w.inputs[2].Value() != "5555" ||
-		w.inputs[4].Value() != "custom_vol" || w.inputs[5].Value() != "my-secret" ||
-		w.inputs[6].Value() != "1G" {
-		t.Fatalf("edited fields were overwritten: container=%q port=%q vol=%q pass=%q mem=%q",
-			w.inputs[1].Value(), w.inputs[2].Value(), w.inputs[4].Value(),
-			w.inputs[5].Value(), w.inputs[6].Value())
+		w.inputs[4].Value() != "my-secret" || w.inputs[5].Value() != "1G" {
+		t.Fatalf("edited fields were overwritten: container=%q port=%q pass=%q mem=%q",
+			w.inputs[1].Value(), w.inputs[2].Value(), w.inputs[4].Value(), w.inputs[5].Value())
 	}
 }
 
@@ -255,15 +325,15 @@ func TestWizardBackAndEmptyBackspace(t *testing.T) {
 	m := &AppModel{mode: ModeWizard, wizard: w}
 
 	_, _ = m.updateWizard(key("b"))
-	if m.wizard.step != StepRuntime {
-		t.Fatalf("b from Name -> Runtime, got %v", m.wizard.step)
+	if m.wizard.step != StepVersion {
+		t.Fatalf("b from Name -> Version, got %v", m.wizard.step)
 	}
 
 	m.wizard.setFocus(StepName)
 	m.wizard.inputs[0].SetValue("")
 	_, _ = m.updateWizard(tea.KeyMsg{Type: tea.KeyBackspace})
-	if m.wizard.step != StepRuntime {
-		t.Fatalf("empty backspace -> Runtime, got %v", m.wizard.step)
+	if m.wizard.step != StepVersion {
+		t.Fatalf("empty backspace -> Version, got %v", m.wizard.step)
 	}
 }
 
@@ -273,8 +343,8 @@ func TestWizardCycleEngineTriggersRecalc(t *testing.T) {
 	w.inputs[0].SetValue("shop")
 	w.inputs[1].SetValue("pg-shop")
 	w.inputs[2].SetValue("5432")
-	w.inputs[5].SetValue("postgres")
-	w.inputs[6].SetValue("512M")
+	w.inputs[4].SetValue("postgres")
+	w.inputs[5].SetValue("512M")
 	w.maxReached = StepEngine
 	w.setFocus(StepEngine)
 	m := &AppModel{mode: ModeWizard, wizard: w}
@@ -296,6 +366,12 @@ func TestWizardConfirmAdvanceUnlocksNext(t *testing.T) {
 	}
 	if !w.confirmAdvance() {
 		t.Fatal("Runtime confirm should succeed")
+	}
+	if w.step != StepVersion || w.maxReached != StepVersion {
+		t.Fatalf("step=%v max=%v, want Version/Version", w.step, w.maxReached)
+	}
+	if !w.confirmAdvance() {
+		t.Fatal("Version confirm should succeed")
 	}
 	if w.step != StepName || w.maxReached != StepName {
 		t.Fatalf("step=%v max=%v, want Name/Name", w.step, w.maxReached)
@@ -518,7 +594,7 @@ func TestEditWizardPrefillsFromInstance(t *testing.T) {
 	if w.runtimes[w.selectedRuntimeIdx] != "podman" {
 		t.Fatal("runtime")
 	}
-	if w.inputs[2].Value() != "5433" || w.inputs[5].Value() != "s3cret" {
+	if w.inputs[2].Value() != "5433" || w.inputs[4].Value() != "s3cret" {
 		t.Fatalf("port/pass not prefilled")
 	}
 	if w.sourceName != "shop" || w.sourceEnvPath != "/tmp/instances/shop.env" {

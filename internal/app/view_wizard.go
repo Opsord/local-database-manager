@@ -27,11 +27,11 @@ type wizardStep int
 const (
 	StepEngine wizardStep = iota
 	StepRuntime
+	StepVersion
 	StepName
 	StepContainerName
 	StepPort
 	StepDatabase
-	StepVolume
 	StepPassword
 	StepMemoryLimit
 	StepReview
@@ -58,6 +58,7 @@ type wizardModel struct {
 
 	selectedEngineIdx  int
 	selectedRuntimeIdx int
+	selectedVersionIdx int
 
 	engines  []string
 	runtimes []string
@@ -81,6 +82,43 @@ func runtimeDisplay(id string) string {
 	return "Docker"
 }
 
+func defaultPostgresVersionIdx() int {
+	for i, v := range core.PostgresVersions {
+		if v == core.DefaultPostgresVersion {
+			return i
+		}
+	}
+	return len(core.PostgresVersions) - 1
+}
+
+func (w *wizardModel) derivedVolume() string {
+	name := strings.TrimSpace(w.inputs[0].Value())
+	engine := w.engines[w.selectedEngineIdx]
+	ver := ""
+	if engine == "postgres" {
+		ver = w.selectedVersion()
+	}
+	return core.DeriveVolumeName(engine, name, ver)
+}
+
+func (w *wizardModel) selectedVersion() string {
+	if w.selectedVersionIdx < 0 || w.selectedVersionIdx >= len(core.PostgresVersions) {
+		return core.DefaultPostgresVersion
+	}
+	return core.PostgresVersions[w.selectedVersionIdx]
+}
+
+func (w *wizardModel) isPostgres() bool {
+	return w.engines[w.selectedEngineIdx] == "postgres"
+}
+
+func (w *wizardModel) adjustStepForEngine(step wizardStep) wizardStep {
+	if !w.isPostgres() && step == StepVersion {
+		return StepName
+	}
+	return step
+}
+
 func (w *wizardModel) blurAll() {
 	for i := range w.inputs {
 		w.inputs[i].Blur()
@@ -98,7 +136,7 @@ func newWizardModel(projectRoot, instancesDir string, existing []*core.DatabaseI
 	engines := []string{"postgres", "sqlserver"}
 	runtimes := []string{"docker", "podman"}
 
-	inputs := make([]textinput.Model, 7)
+	inputs := make([]textinput.Model, 6)
 
 	inputs[0] = styleTextInput(textinput.New())
 	inputs[0].Placeholder = "my_new_instance"
@@ -114,13 +152,10 @@ func newWizardModel(projectRoot, instancesDir string, existing []*core.DatabaseI
 	inputs[3].Placeholder = "my_new_db"
 
 	inputs[4] = styleTextInput(textinput.New())
-	inputs[4].Placeholder = "pgdata_my_new_instance"
+	inputs[4].SetValue("postgres")
 
 	inputs[5] = styleTextInput(textinput.New())
-	inputs[5].SetValue("postgres")
-
-	inputs[6] = styleTextInput(textinput.New())
-	inputs[6].SetValue("512M")
+	inputs[5].SetValue("512M")
 
 	for i := range inputs {
 		inputs[i].Prompt = ""
@@ -136,6 +171,7 @@ func newWizardModel(projectRoot, instancesDir string, existing []*core.DatabaseI
 		maxReached:         StepEngine,
 		selectedEngineIdx:  0,
 		selectedRuntimeIdx: 0,
+		selectedVersionIdx: defaultPostgresVersionIdx(),
 		engines:            engines,
 		runtimes:           runtimes,
 		inputs:             inputs,
@@ -173,10 +209,18 @@ func newEditWizardModel(projectRoot, instancesDir string, existing []*core.Datab
 	w.inputs[1].SetValue(inst.ContainerName)
 	w.inputs[2].SetValue(strconv.Itoa(inst.Port))
 	w.inputs[3].SetValue(inst.Database)
-	w.inputs[4].SetValue(inst.Volume)
-	w.inputs[5].SetValue(inst.Password)
+	w.inputs[4].SetValue(inst.Password)
 	if inst.MemoryLimit != "" {
-		w.inputs[6].SetValue(inst.MemoryLimit)
+		w.inputs[5].SetValue(inst.MemoryLimit)
+	}
+	if inst.EngineType == "postgres" && inst.Version != "" {
+		normalized := core.NormalizePostgresVersion(inst.Version)
+		for i, v := range core.PostgresVersions {
+			if v == normalized {
+				w.selectedVersionIdx = i
+				break
+			}
+		}
 	}
 
 	w.maxReached = StepReview
@@ -192,6 +236,7 @@ func (w *wizardModel) setFocus(step wizardStep) {
 	if step > w.maxReached {
 		step = w.maxReached
 	}
+	step = w.adjustStepForEngine(step)
 	w.step = step
 	w.blurAll()
 	if step >= StepName && step <= StepMemoryLimit {
@@ -201,7 +246,16 @@ func (w *wizardModel) setFocus(step wizardStep) {
 }
 
 func (w *wizardModel) moveFocus(delta int) {
-	w.setFocus(w.step + wizardStep(delta))
+	next := w.step + wizardStep(delta)
+	if !w.isPostgres() {
+		if delta > 0 && next == StepVersion {
+			next = StepName
+		}
+		if delta < 0 && next == StepVersion {
+			next = StepRuntime
+		}
+	}
+	w.setFocus(next)
 }
 
 func (w *wizardModel) cycleOption(delta int) {
@@ -224,6 +278,15 @@ func (w *wizardModel) cycleOption(delta int) {
 			n = len(w.runtimes) - 1
 		}
 		w.selectedRuntimeIdx = n
+	case StepVersion:
+		n := w.selectedVersionIdx + delta
+		if n < 0 {
+			n = 0
+		}
+		if n >= len(core.PostgresVersions) {
+			n = len(core.PostgresVersions) - 1
+		}
+		w.selectedVersionIdx = n
 	}
 }
 
@@ -234,6 +297,15 @@ func (w *wizardModel) confirmAdvance() bool {
 		w.setFocus(StepRuntime)
 		return true
 	case StepRuntime:
+		if w.isPostgres() {
+			w.maxReached = maxStep(w.maxReached, StepVersion)
+			w.setFocus(StepVersion)
+		} else {
+			w.maxReached = maxStep(w.maxReached, StepName)
+			w.setFocus(StepName)
+		}
+		return true
+	case StepVersion:
 		w.maxReached = maxStep(w.maxReached, StepName)
 		w.setFocus(StepName)
 		return true
@@ -258,10 +330,6 @@ func (w *wizardModel) confirmAdvance() bool {
 		w.setFocus(StepDatabase)
 		return true
 	case StepDatabase:
-		w.maxReached = maxStep(w.maxReached, StepVolume)
-		w.setFocus(StepVolume)
-		return true
-	case StepVolume:
 		w.maxReached = maxStep(w.maxReached, StepPassword)
 		w.setFocus(StepPassword)
 		return true
@@ -292,7 +360,7 @@ func (w *wizardModel) applyNameAutofill() {
 	name := strings.TrimSpace(w.inputs[0].Value())
 	engine := w.engines[w.selectedEngineIdx]
 
-	prefix, volPrefix, defaultPort, defaultPass, defaultMem := engineDefaults(engine)
+	prefix, _, defaultPort, defaultPass, defaultMem := engineDefaults(engine)
 
 	if w.inputs[1].Value() == "" {
 		w.inputs[1].SetValue(fmt.Sprintf("%s-%s", prefix, name))
@@ -304,14 +372,11 @@ func (w *wizardModel) applyNameAutofill() {
 	if w.inputs[3].Value() == "" {
 		w.inputs[3].SetValue(fmt.Sprintf("%s_db", name))
 	}
-	if w.inputs[4].Value() == "" {
-		w.inputs[4].SetValue(fmt.Sprintf("%s_%s", volPrefix, name))
+	if w.inputs[4].Value() == "" || w.inputs[4].Value() == "postgres" {
+		w.inputs[4].SetValue(defaultPass)
 	}
-	if w.inputs[5].Value() == "" || w.inputs[5].Value() == "postgres" {
-		w.inputs[5].SetValue(defaultPass)
-	}
-	if w.inputs[6].Value() == "" || w.inputs[6].Value() == "512M" {
-		w.inputs[6].SetValue(defaultMem)
+	if w.inputs[5].Value() == "" || w.inputs[5].Value() == "512M" {
+		w.inputs[5].SetValue(defaultMem)
 	}
 }
 
@@ -327,8 +392,8 @@ func (w *wizardModel) applyEngineDefaults(prevEngine, nextEngine string) {
 		return
 	}
 	name := strings.TrimSpace(w.inputs[0].Value())
-	prevP, prevV, prevPort, prevPass, prevMem := engineDefaults(prevEngine)
-	nextP, nextV, nextPort, nextPass, nextMem := engineDefaults(nextEngine)
+	prevP, _, prevPort, prevPass, prevMem := engineDefaults(prevEngine)
+	nextP, _, nextPort, nextPass, nextMem := engineDefaults(nextEngine)
 
 	if name != "" {
 		oldCont := fmt.Sprintf("%s-%s", prevP, name)
@@ -336,21 +401,24 @@ func (w *wizardModel) applyEngineDefaults(prevEngine, nextEngine string) {
 		if w.inputs[1].Value() == oldCont {
 			w.inputs[1].SetValue(newCont)
 		}
-		oldVol := fmt.Sprintf("%s_%s", prevV, name)
-		newVol := fmt.Sprintf("%s_%s", nextV, name)
-		if w.inputs[4].Value() == oldVol {
-			w.inputs[4].SetValue(newVol)
-		}
 	}
 	if w.inputs[2].Value() == prevPort {
 		free := core.FindNextFreePort(mustAtoi(nextPort), w.instances)
 		w.inputs[2].SetValue(strconv.Itoa(free))
 	}
-	if w.inputs[5].Value() == prevPass {
-		w.inputs[5].SetValue(nextPass)
+	if w.inputs[4].Value() == prevPass {
+		w.inputs[4].SetValue(nextPass)
 	}
-	if w.inputs[6].Value() == prevMem {
-		w.inputs[6].SetValue(nextMem)
+	if w.inputs[5].Value() == prevMem {
+		w.inputs[5].SetValue(nextMem)
+	}
+	if nextEngine == "postgres" {
+		if w.selectedVersionIdx < 0 || w.selectedVersionIdx >= len(core.PostgresVersions) {
+			w.selectedVersionIdx = defaultPostgresVersionIdx()
+		}
+	}
+	if w.step == StepVersion && !w.isPostgres() {
+		w.setFocus(StepName)
 	}
 }
 
@@ -511,18 +579,19 @@ func (w *wizardModel) saveInstance() error {
 	containerName := strings.TrimSpace(w.inputs[1].Value())
 	port := strings.TrimSpace(w.inputs[2].Value())
 	db := strings.TrimSpace(w.inputs[3].Value())
-	volume := strings.TrimSpace(w.inputs[4].Value())
-	pass := strings.TrimSpace(w.inputs[5].Value())
-	memLimit := strings.TrimSpace(w.inputs[6].Value())
+	pass := strings.TrimSpace(w.inputs[4].Value())
+	memLimit := strings.TrimSpace(w.inputs[5].Value())
 	if memLimit == "" {
 		memLimit = "512M"
 	}
 
 	engine := w.engines[w.selectedEngineIdx]
 	runtime := w.runtimes[w.selectedRuntimeIdx]
+	volume := w.derivedVolume()
 
 	var content string
 	if engine == "postgres" {
+		version := w.selectedVersion()
 		content = fmt.Sprintf(`ENGINE=postgres
 RUNTIME=%s
 
@@ -535,8 +604,9 @@ POSTGRES_USER=postgres
 POSTGRES_PASSWORD=%s
 POSTGRES_DB=%s
 POSTGRES_SCHEMA=public
+POSTGRES_VERSION=%s
 POSTGRES_VOLUME=%s
-`, runtime, containerName, containerName, memLimit, port, pass, db, volume)
+`, runtime, containerName, containerName, memLimit, port, pass, db, version, volume)
 	} else {
 		content = fmt.Sprintf(`ENGINE=sqlserver
 RUNTIME=%s
@@ -570,6 +640,12 @@ SQLSERVER_VOLUME=%s
 		}
 	}
 	return nil
+}
+
+func (m *AppModel) wizardPreviewRow(inner int, label, value string) string {
+	return lipgloss.NewStyle().Width(inner).Background(BgSurface).Render(
+		LabelStyle.Render(label) + " " + MutedStyle.Render(value),
+	)
 }
 
 func (m *AppModel) wizardValueRow(inner int, label, value string, inputIdx int, extra string) string {
@@ -709,30 +785,65 @@ func (m *AppModel) buildWizardBodyRows(inner, inputWidth int) string {
 		}
 	}
 
+	if w.isPostgres() && w.maxReached >= StepVersion {
+		if w.step == StepVersion {
+			parts := []string{LabelStyle.Render("3. Version:")}
+			for i, ver := range core.PostgresVersions {
+				if i == w.selectedVersionIdx {
+					parts = append(parts, SelectedItemStyle.Render(fmt.Sprintf(" [%s] ", ver)))
+				} else {
+					parts = append(parts, NormalItemStyle.Render(fmt.Sprintf(" %s ", ver)))
+				}
+			}
+			content = append(content, row(parts...))
+		} else {
+			content = append(content, row(LabelStyle.Render("3. Version:"), ValueHighlightStyle.Render(w.selectedVersion())))
+		}
+	}
+
+	nameLabel := "3. Name:"
+	containerLabel := "4. Container:"
+	portLabel := "5. Port:"
+	dbLabel := "6. Database:"
+	passLabel := "7. Password:"
+	memLabel := "8. Memory:"
+	if w.isPostgres() && w.maxReached >= StepVersion {
+		nameLabel = "4. Name:"
+		containerLabel = "5. Container:"
+		portLabel = "6. Port:"
+		dbLabel = "7. Database:"
+		passLabel = "8. Password:"
+		memLabel = "9. Memory:"
+	}
+
 	if w.maxReached >= StepName {
-		content = append(content, m.wizardValueRow(inner, "3. Name:", truncateEnd(w.inputs[0].Value(), inputWidth), 0, ""))
+		content = append(content, m.wizardValueRow(inner, nameLabel, truncateEnd(w.inputs[0].Value(), inputWidth), 0, ""))
 	}
 	if w.maxReached >= StepContainerName {
-		content = append(content, m.wizardValueRow(inner, "4. Container:", truncateEnd(w.inputs[1].Value(), inputWidth), 1, ""))
+		content = append(content, m.wizardValueRow(inner, containerLabel, truncateEnd(w.inputs[1].Value(), inputWidth), 1, ""))
 	}
 	if w.maxReached >= StepPort {
-		content = append(content, m.wizardValueRow(inner, "5. Port:", truncateEnd(w.inputs[2].Value(), inputWidth), 2, ""))
+		content = append(content, m.wizardValueRow(inner, portLabel, truncateEnd(w.inputs[2].Value(), inputWidth), 2, ""))
 	}
 	if w.maxReached >= StepDatabase {
-		content = append(content, m.wizardValueRow(inner, "6. Database:", truncateEnd(w.inputs[3].Value(), inputWidth), 3, ""))
+		content = append(content, m.wizardValueRow(inner, dbLabel, truncateEnd(w.inputs[3].Value(), inputWidth), 3, ""))
 	}
-	if w.maxReached >= StepVolume {
-		content = append(content, m.wizardValueRow(inner, "7. Volume:", truncateEnd(w.inputs[4].Value(), inputWidth), 4, ""))
+	if w.maxReached >= StepDatabase {
+		volLabel := "Volume:"
+		if w.isPostgres() && w.maxReached >= StepVersion {
+			volLabel = "  Volume:"
+		}
+		content = append(content, m.wizardPreviewRow(inner, volLabel, truncateEnd(w.derivedVolume(), inputWidth)))
 	}
 	if w.maxReached >= StepPassword {
-		content = append(content, m.wizardValueRow(inner, "8. Password:", truncateEnd(w.inputs[5].Value(), inputWidth), 5, ""))
+		content = append(content, m.wizardValueRow(inner, passLabel, truncateEnd(w.inputs[4].Value(), inputWidth), 4, ""))
 	}
 	if w.maxReached >= StepMemoryLimit {
 		recommendation := "(Recommended: 512M - 1G)"
 		if w.engines[w.selectedEngineIdx] == "sqlserver" {
 			recommendation = "(Recommended: 2G min for MSSQL)"
 		}
-		content = append(content, m.wizardValueRow(inner, "9. Memory:", truncateEnd(w.inputs[6].Value(), inputWidth), 6, recommendation))
+		content = append(content, m.wizardValueRow(inner, memLabel, truncateEnd(w.inputs[5].Value(), inputWidth), 5, recommendation))
 	}
 
 	if len(content) == 0 {
