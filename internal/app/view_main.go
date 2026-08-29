@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"local-database-manager/internal/core"
@@ -76,8 +78,8 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.selectedIndex > 0 {
 				m.selectedIndex--
 			}
-			if m.confirmPurge {
-				m.confirmPurge = false
+			if m.confirmPurge || m.confirmEngineStart || m.confirmEngineStop || m.confirmRestartAfterEdit {
+				m.clearConfirms()
 				m.statusMsg = ""
 			}
 			return m, nil
@@ -87,8 +89,8 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.selectedIndex < len(list)-1 {
 				m.selectedIndex++
 			}
-			if m.confirmPurge {
-				m.confirmPurge = false
+			if m.confirmPurge || m.confirmEngineStart || m.confirmEngineStop || m.confirmRestartAfterEdit {
+				m.clearConfirms()
 				m.statusMsg = ""
 			}
 			return m, nil
@@ -98,7 +100,7 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if inst == nil {
 				return m, nil
 			}
-			m.confirmPurge = false
+			m.clearConfirms()
 			if inst.Status == core.StatusReady || inst.Status == core.StatusStarting {
 				m.statusMsg = fmt.Sprintf("Stopping '%s'...", inst.Name)
 			} else {
@@ -138,18 +140,13 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
 
 		case "e":
-			inst := m.selectedInstance()
-			if inst == nil {
+			if m.engineStarting {
 				return m, nil
 			}
-			if err := core.OpenInEditor(inst.EnvFilePath); err != nil {
-				m.statusMsg = fmt.Sprintf("Failed to open editor: %v", err)
-				m.statusIsErr = true
-			} else {
-				m.statusMsg = fmt.Sprintf("Opening %s in editor...", inst.Name)
-				m.statusIsErr = false
-			}
-			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
+			m.clearConfirms()
+			m.mode = ModeEngineMenu
+			m.engineMenuIndex = 0
+			return m, nil
 
 		case "d":
 			inst := m.selectedInstance()
@@ -157,6 +154,7 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if !m.confirmPurge {
+				m.clearConfirms()
 				m.confirmPurge = true
 				m.statusMsg = fmt.Sprintf("Purge container and volume for '%s'? Press 'y' to confirm, 'n' to cancel", inst.Name)
 				m.statusIsErr = true
@@ -164,6 +162,36 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "y":
+			if m.confirmRestartAfterEdit {
+				old := m.pendingRestartOld
+				newName := m.pendingRestartNewName
+				m.confirmRestartAfterEdit = false
+				m.pendingRestartOld = nil
+				m.pendingRestartNewName = ""
+				m.statusMsg = fmt.Sprintf("Restarting '%s'...", newName)
+				m.statusIsErr = false
+				return m, m.restartAfterEditCmd(old, newName)
+			}
+			if m.confirmEngineStop {
+				if m.engineStarting {
+					return m, nil
+				}
+				return m, m.confirmEngineStopYes()
+			}
+			if m.confirmEngineStart {
+				if m.engineStarting {
+					return m, nil
+				}
+				runtime := m.pendingEngineRuntime
+				inst := m.pendingStartInst
+				m.confirmEngineStart = false
+				m.pendingEngineRuntime = ""
+				m.pendingStartInst = nil
+				m.engineStarting = true
+				m.statusMsg = engineStartStatusMsg(runtime)
+				m.statusIsErr = false
+				return m, m.startEngineCmd(runtime, inst)
+			}
 			if m.confirmPurge {
 				inst := m.selectedInstance()
 				m.confirmPurge = false
@@ -175,6 +203,26 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "n":
+			if m.confirmRestartAfterEdit {
+				m.confirmRestartAfterEdit = false
+				m.pendingRestartOld = nil
+				m.pendingRestartNewName = ""
+				m.finishEditRenameCleanup()
+				m.statusMsg = "Restart cancelled"
+				m.statusIsErr = false
+				return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
+			}
+			if m.confirmEngineStop {
+				return m, m.cancelEngineStopConfirm()
+			}
+			if m.confirmEngineStart {
+				m.confirmEngineStart = false
+				m.pendingStartInst = nil
+				m.pendingEngineRuntime = ""
+				m.statusMsg = "Action cancelled"
+				m.statusIsErr = false
+				return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
+			}
 			if m.confirmPurge {
 				m.confirmPurge = false
 				m.statusMsg = "Action cancelled"
@@ -203,6 +251,11 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+type offlineStartMsg struct {
+	inst *core.DatabaseInstance
+	err  error
+}
+
 func (m *AppModel) toggleInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
@@ -217,6 +270,9 @@ func (m *AppModel) toggleInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
 		}
 
 		if err != nil {
+			if actionName == "started" && errors.Is(err, core.ErrEngineOffline) {
+				return offlineStartMsg{inst: inst, err: err}
+			}
 			return errMsg{err}
 		}
 
@@ -230,6 +286,25 @@ func (m *AppModel) toggleInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
 		return actionDoneMsg{
 			msg: fmt.Sprintf("Instance '%s' %s successfully!", inst.Name, actionName),
 		}
+	}
+}
+
+func (m *AppModel) restartAfterEditCmd(old *core.DatabaseInstance, newName string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		stopErr := m.runner.Stop(ctx, old)
+		newInst, err := core.ParseEnvFile(filepath.Join(m.instancesDir, newName+".env"))
+		if err != nil {
+			return restartAfterEditDoneMsg{name: newName, err: err}
+		}
+		startErr := m.runner.Start(ctx, newInst)
+		if startErr != nil {
+			if stopErr != nil {
+				return restartAfterEditDoneMsg{name: newName, err: fmt.Errorf("stop: %v; start: %v", stopErr, startErr)}
+			}
+			return restartAfterEditDoneMsg{name: newName, err: startErr}
+		}
+		return restartAfterEditDoneMsg{name: newName}
 	}
 }
 
@@ -285,12 +360,24 @@ func mainShortcutEntries() []string {
 		shortcut("[Enter]", "Actions"),
 		shortcut("[/]", "Search"),
 		shortcut("[Space]", "Toggle"),
+		shortcut("[e]", "Engines"),
 		shortcut("[c]", "URI"),
 		shortcut("[l]", "Logs"),
 		shortcut("[d]", "Purge"),
 		shortcut("[n]", "New"),
 		shortcut("[?]", "Help"),
 		shortcut("[q]", "Quit"),
+	}
+}
+
+func actionShortcutEntries() []string {
+	shortcut := func(key, desc string) string {
+		return lipgloss.JoinHorizontal(lipgloss.Top, KeyStyle.Render(key), surfaceGap(1), KeyDescStyle.Render(desc))
+	}
+	return []string{
+		shortcut("[↑↓]", "Nav"),
+		shortcut("[Enter]", "Run"),
+		shortcut("[Esc]", "Close"),
 	}
 }
 
@@ -304,6 +391,18 @@ func wizardShortcutEntries() []string {
 		shortcut("[Enter]", "Next"),
 		shortcut("[b]", "Back"),
 		shortcut("[Esc]", "Cancel"),
+	}
+}
+
+func engineShortcutEntries() []string {
+	shortcut := func(key, desc string) string {
+		return lipgloss.JoinHorizontal(lipgloss.Top, KeyStyle.Render(key), surfaceGap(1), KeyDescStyle.Render(desc))
+	}
+	return []string{
+		shortcut("[↑↓]", "Nav"),
+		shortcut("[Enter]", "start/stop"),
+		shortcut("[y/n]", "confirm stop"),
+		shortcut("[Esc]", "Close"),
 	}
 }
 
@@ -371,25 +470,45 @@ func (m *AppModel) viewMain() string {
 		leftTitle = fmt.Sprintf("Filter (%d/%d)", len(filteredList), len(m.instances))
 	}
 
-	leftBox := panelBoxStyle(m.mode != ModeWizard).
-		Width(leftWidth).
-		Height(contentHeight).
-		Render(
-			lipgloss.JoinVertical(
+	var leftColumn string
+	if m.mode == ModeEngineMenu {
+		listH, engH := splitPanelHalfHeight(contentHeight - 1)
+		listBlock := lipgloss.NewStyle().
+			Width(leftInner).
+			Height(listH).
+			MaxHeight(listH).
+			Background(BgSurface).
+			Render(lipgloss.JoinVertical(
 				lipgloss.Left,
 				panelTitle(leftTitle, leftInner),
 				lipgloss.JoinVertical(lipgloss.Left, listItems...),
-			),
-		)
+			))
+		engBlock := m.viewEngineDock(leftInner, engH)
+		leftColumn = ActivePanelStyle.
+			Width(leftWidth).
+			Height(contentHeight).
+			Render(lipgloss.JoinVertical(lipgloss.Left, listBlock, panelSeparator(leftInner), engBlock))
+	} else {
+		leftColumn = panelBoxStyle(m.mode != ModeWizard && m.mode != ModeActionMenu).
+			Width(leftWidth).
+			Height(contentHeight).
+			Render(
+				lipgloss.JoinVertical(
+					lipgloss.Left,
+					panelTitle(leftTitle, leftInner),
+					lipgloss.JoinVertical(lipgloss.Left, listItems...),
+				),
+			)
+	}
 
 	detailsContent := m.buildRightDetailsContent(rightInner, rightWidth)
 
 	var rightColumn string
-	if m.mode == ModeWizard {
+	if m.mode == ModeWizard || m.mode == ModeActionMenu {
 		// One bordered panel for the whole right column. Two stacked bordered
 		// panels add an extra pair of borders and make the right side taller
 		// than the left, which shifts the layout and clips the header title.
-		detailsH, wizardH := splitPanelHalfHeight(contentHeight - 1) // -1 for separator
+		detailsH, dockH := splitPanelHalfHeight(contentHeight - 1) // -1 for separator
 		detailsBlock := lipgloss.NewStyle().
 			Width(rightInner).
 			Height(detailsH).
@@ -400,12 +519,17 @@ func (m *AppModel) viewMain() string {
 				panelTitle("Details & Config", rightInner),
 				detailsContent,
 			))
-		wizardBlock := m.viewWizardDock(rightInner, wizardH)
+		var dockBlock string
+		if m.mode == ModeWizard {
+			dockBlock = m.viewWizardDock(rightInner, dockH)
+		} else {
+			dockBlock = m.viewActionDock(rightInner, dockH)
+		}
 		rightInnerCol := lipgloss.JoinVertical(
 			lipgloss.Left,
 			detailsBlock,
 			panelSeparator(rightInner),
-			wizardBlock,
+			dockBlock,
 		)
 		rightColumn = ActivePanelStyle.
 			Width(rightWidth).
@@ -425,7 +549,7 @@ func (m *AppModel) viewMain() string {
 	}
 
 	panelGap := lipgloss.NewStyle().Background(BgDark).Width(gapW).Render(" ")
-	mainSplit := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, panelGap, rightColumn)
+	mainSplit := lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, panelGap, rightColumn)
 
 	statusLine := m.statusMsg
 	if statusLine == "" {
@@ -438,8 +562,13 @@ func (m *AppModel) viewMain() string {
 	}
 
 	shortcuts := mainShortcutEntries()
-	if m.mode == ModeWizard {
+	switch m.mode {
+	case ModeWizard:
 		shortcuts = wizardShortcutEntries()
+	case ModeActionMenu:
+		shortcuts = actionShortcutEntries()
+	case ModeEngineMenu:
+		shortcuts = engineShortcutEntries()
 	}
 	shortcutsBar := formatShortcutBar(inner-2, shortcuts)
 

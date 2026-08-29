@@ -21,9 +21,16 @@ const (
 	EngineNotInstalled EngineHealth = "NOT_INSTALLED"
 )
 
+const (
+	engineStartTimeout  = 90 * time.Second
+	enginePollInterval  = 2 * time.Second
+)
+
 // InstanceRunner defines the interface for database lifecycle operations.
 type InstanceRunner interface {
 	CheckEngineHealth(ctx context.Context, runtimeName string) EngineHealth
+	StartEngine(ctx context.Context, runtimeName string) error
+	StopEngine(ctx context.Context, runtimeName string) error
 	Start(ctx context.Context, inst *DatabaseInstance) error
 	Stop(ctx context.Context, inst *DatabaseInstance) error
 	DownVolumes(ctx context.Context, inst *DatabaseInstance) error
@@ -63,6 +70,130 @@ func (r *Runner) CheckEngineHealth(ctx context.Context, runtimeName string) Engi
 		return EngineOffline
 	}
 	return EngineOnline
+}
+
+// StartEngine attempts to start the container runtime daemon when it is offline.
+func (r *Runner) StartEngine(ctx context.Context, runtimeName string) error {
+	bin := runtimeName
+	if bin == "" {
+		bin = "docker"
+	}
+	health := r.CheckEngineHealth(ctx, bin)
+	switch health {
+	case EngineOnline:
+		return nil
+	case EngineNotInstalled:
+		return fmt.Errorf("%w: %s", ErrEngineNotInstalled, bin)
+	}
+	switch bin {
+	case "podman":
+		return r.startPodmanMachine(ctx)
+	case "docker":
+		return r.startDockerEngine(ctx)
+	default:
+		return fmt.Errorf("%w: unsupported runtime %q", ErrEngineStartFailed, bin)
+	}
+}
+
+// StopEngine attempts to stop the container runtime daemon when it is online.
+func (r *Runner) StopEngine(ctx context.Context, runtimeName string) error {
+	bin := runtimeName
+	if bin == "" {
+		bin = "docker"
+	}
+	health := r.CheckEngineHealth(ctx, bin)
+	switch health {
+	case EngineOffline:
+		return nil
+	case EngineNotInstalled:
+		return fmt.Errorf("%w: %s", ErrEngineNotInstalled, bin)
+	}
+	switch bin {
+	case "podman":
+		return r.stopPodmanMachine(ctx)
+	case "docker":
+		return r.stopDockerEngine(ctx)
+	default:
+		return fmt.Errorf("%w: unsupported runtime %q", ErrEngineStartFailed, bin)
+	}
+}
+
+func (r *Runner) stopPodmanMachine(ctx context.Context) error {
+	cmdCtx, cancel := context.WithTimeout(ctx, engineStartTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(cmdCtx, "podman", "machine", "stop")
+	var stderr bytes.Buffer
+	cmd.Stdout = io.Discard
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if r.CheckEngineHealth(context.Background(), "podman") != EngineOnline {
+			return nil
+		}
+		return fmt.Errorf("%w: podman machine stop: %v (%s)", ErrEngineStartFailed, err, strings.TrimSpace(stderr.String()))
+	}
+	return r.waitUntilOffline(cmdCtx, "podman")
+}
+
+func (r *Runner) waitUntilOffline(ctx context.Context, runtimeName string) error {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, engineStartTimeout)
+		defer cancel()
+		deadline, _ = ctx.Deadline()
+	}
+	for {
+		if r.CheckEngineHealth(ctx, runtimeName) != EngineOnline {
+			return nil
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			return fmt.Errorf("%w: timed out waiting for %s to stop", ErrEngineStartFailed, runtimeName)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("%w: timed out waiting for %s to stop", ErrEngineStartFailed, runtimeName)
+		case <-time.After(enginePollInterval):
+		}
+	}
+}
+
+func (r *Runner) startPodmanMachine(ctx context.Context) error {
+	cmdCtx, cancel := context.WithTimeout(ctx, engineStartTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(cmdCtx, "podman", "machine", "start")
+	var stderr bytes.Buffer
+	cmd.Stdout = io.Discard
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if r.CheckEngineHealth(context.Background(), "podman") == EngineOnline {
+			return nil
+		}
+		return fmt.Errorf("%w: podman machine start: %v (%s)", ErrEngineStartFailed, err, strings.TrimSpace(stderr.String()))
+	}
+	return r.waitUntilOnline(cmdCtx, "podman")
+}
+
+func (r *Runner) waitUntilOnline(ctx context.Context, runtimeName string) error {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, engineStartTimeout)
+		defer cancel()
+		deadline, _ = ctx.Deadline()
+	}
+	for {
+		if r.CheckEngineHealth(ctx, runtimeName) == EngineOnline {
+			return nil
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			return fmt.Errorf("%w: timed out waiting for %s", ErrEngineStartFailed, runtimeName)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("%w: timed out waiting for %s", ErrEngineStartFailed, runtimeName)
+		case <-time.After(enginePollInterval):
+		}
+	}
 }
 
 // GetComposeFile resolves the appropriate compose file path for an instance.

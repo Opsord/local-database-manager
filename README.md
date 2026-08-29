@@ -15,8 +15,10 @@ A lightweight, high-performance interactive Terminal User Interface (TUI) built 
 - 📋 **One-Key Connection Copy:** Copy standard connection URIs (`postgresql://...`, `sqlserver://...`) directly to the clipboard with `c`.
 - 📦 **Backend .env Block Export (`E` / `x`):** Copy a complete multi-variable configuration block formatted ready to paste into backend projects.
 - 🪄 **Interactive Creation Wizard (`n`):** Step-by-step form to spin up new database instances with automatic free port detection.
+- ✏️ **In-TUI Edit Instance:** Docked wizard (via Action Menu) to edit all instance fields; `[o]` opens external editor; saving while running prompts restart (`y`/`n`).
 - 📜 **Real-time Log Streamer (`l`):** Fullscreen live container logs viewport with smooth scrolling.
 - 🧹 **Safe Volume Purge (`d`):** Destroy container and associated data volumes with confirmation.
+- 🐳 **Engines Panel (`e`):** Docked left panel to start Docker Desktop / Podman when offline, or stop when online (`y/n` confirm).
 
 ---
 
@@ -64,14 +66,15 @@ local-database-manager/
 | Key | Action | Description |
 | :--- | :--- | :--- |
 | `↑` / `↓` or `k` / `j` | Navigate | Move cursor through configured database instances |
-| `Enter` | Action Menu | Open interactive Command Palette for the selected instance |
+| `Enter` | Action Menu | Dock Action Menu in the bottom-right panel (Start/Stop, Copy URI, Logs, **Edit Instance**, Purge) |
+| `o` | External editor | While **Edit Instance** wizard is open, open the `.env` in your system editor |
 | `/` | Live Search | Filter database instances in real-time by name, engine, runtime or port |
 | `Space` | Start / Stop | Toggle container state (`up -d` / `down`) |
 | `c` | Copy URI | Copy full connection URI (`postgresql://...`) to clipboard |
 | `E` / `x` | Export .env | Copy complete backend `.env` block to clipboard |
 | `l` | Live Logs | Open real-time log viewer (`Esc` / `q` to return) |
 | `n` | New Instance | Open interactive instance creation wizard |
-| `e` | Edit `.env` | Open instance configuration in your default editor (`code` / `notepad`) |
+| `e` | Engines | Dock Engines panel (left) — Start when offline; Stop when online (`y/n` confirm) |
 | `d` | Down -v (Purge) | Destroy container and persistent data volume (`y/N` prompt) |
 | `r` | Reload | Rescan `instances/` directory and refresh daemon health |
 | `?` | Help | Open shortcuts cheatsheet and driver recommendations |

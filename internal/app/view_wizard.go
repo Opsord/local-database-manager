@@ -15,6 +15,13 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+type wizardKind int
+
+const (
+	wizardCreate wizardKind = iota
+	wizardEdit
+)
+
 type wizardStep int
 
 const (
@@ -34,6 +41,16 @@ type wizardModel struct {
 	projectRoot  string
 	instancesDir string
 	instances    []*core.DatabaseInstance
+
+	kind wizardKind
+
+	sourceName          string
+	sourceEnvPath       string
+	sourceRuntime       string
+	sourceProjectName   string
+	sourceContainerName string
+	sourceEngine        string
+	wasRunning          bool
 
 	step wizardStep
 
@@ -114,6 +131,7 @@ func newWizardModel(projectRoot, instancesDir string, existing []*core.DatabaseI
 		projectRoot:        projectRoot,
 		instancesDir:       instancesDir,
 		instances:          existing,
+		kind:               wizardCreate,
 		step:               StepEngine,
 		maxReached:         StepEngine,
 		selectedEngineIdx:  0,
@@ -123,6 +141,46 @@ func newWizardModel(projectRoot, instancesDir string, existing []*core.DatabaseI
 		inputs:             inputs,
 		scrollViewport:     viewport.New(60, 8),
 	}
+	w.blurAll()
+	return w
+}
+
+func newEditWizardModel(projectRoot, instancesDir string, existing []*core.DatabaseInstance, inst *core.DatabaseInstance) wizardModel {
+	w := newWizardModel(projectRoot, instancesDir, existing)
+	w.kind = wizardEdit
+	w.sourceName = inst.Name
+	w.sourceEnvPath = inst.EnvFilePath
+	w.sourceRuntime = inst.Runtime
+	w.sourceProjectName = inst.ProjectName
+	w.sourceContainerName = inst.ContainerName
+	w.sourceEngine = inst.EngineType
+	w.wasRunning = inst.Status == core.StatusReady || inst.Status == core.StatusStarting
+
+	for i, e := range w.engines {
+		if e == inst.EngineType {
+			w.selectedEngineIdx = i
+			break
+		}
+	}
+	for i, r := range w.runtimes {
+		if r == inst.Runtime {
+			w.selectedRuntimeIdx = i
+			break
+		}
+	}
+
+	w.inputs[0].SetValue(inst.Name)
+	w.inputs[1].SetValue(inst.ContainerName)
+	w.inputs[2].SetValue(strconv.Itoa(inst.Port))
+	w.inputs[3].SetValue(inst.Database)
+	w.inputs[4].SetValue(inst.Volume)
+	w.inputs[5].SetValue(inst.Password)
+	if inst.MemoryLimit != "" {
+		w.inputs[6].SetValue(inst.MemoryLimit)
+	}
+
+	w.maxReached = StepReview
+	w.step = StepReview
 	w.blurAll()
 	return w
 }
@@ -180,7 +238,11 @@ func (w *wizardModel) confirmAdvance() bool {
 		w.setFocus(StepName)
 		return true
 	case StepName:
-		if strings.TrimSpace(w.inputs[0].Value()) == "" {
+		name := strings.TrimSpace(w.inputs[0].Value())
+		if name == "" {
+			return false
+		}
+		if w.nameTaken(name) {
 			return false
 		}
 		w.applyNameAutofill()
@@ -224,6 +286,9 @@ func maxStep(a, b wizardStep) wizardStep {
 }
 
 func (w *wizardModel) applyNameAutofill() {
+	if w.kind == wizardEdit {
+		return
+	}
 	name := strings.TrimSpace(w.inputs[0].Value())
 	engine := w.engines[w.selectedEngineIdx]
 
@@ -302,21 +367,73 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "esc", "ctrl+c":
 			m.mode = ModeMain
-			m.statusMsg = "Instance creation cancelled"
+			if w.kind == wizardEdit {
+				m.statusMsg = "Instance edit cancelled"
+			} else {
+				m.statusMsg = "Instance creation cancelled"
+			}
 			m.statusIsErr = false
 			return m, nil
 
+		case "o":
+			if w.kind == wizardEdit {
+				if err := core.OpenInEditor(w.sourceEnvPath); err != nil {
+					m.statusMsg = fmt.Sprintf("Failed to open editor: %v", err)
+					m.statusIsErr = true
+				} else {
+					m.statusMsg = fmt.Sprintf("Opening %s in editor...", w.sourceEnvPath)
+					m.statusIsErr = false
+				}
+				return m, nil
+			}
+
 		case "enter":
 			if w.step == StepReview {
-				if err := w.saveInstance(); err != nil {
-					m.statusMsg = fmt.Sprintf("Error saving instance: %v", err)
+				name := strings.TrimSpace(w.inputs[0].Value())
+				if w.nameTaken(name) {
+					m.statusMsg = fmt.Sprintf("Instance name '%s' is already taken", name)
 					m.statusIsErr = true
-					m.mode = ModeMain
 					return m, nil
 				}
 
+				var oldInst *core.DatabaseInstance
+				if w.kind == wizardEdit && w.wasRunning {
+					oldInst = &core.DatabaseInstance{
+						Name:          w.sourceName,
+						Runtime:       w.sourceRuntime,
+						ProjectName:   w.sourceProjectName,
+						ContainerName: w.sourceContainerName,
+						EnvFilePath:   w.sourceEnvPath,
+						EngineType:    w.sourceEngine,
+					}
+				}
+
+				if err := w.saveInstance(); err != nil {
+					m.statusMsg = fmt.Sprintf("Error saving instance: %v", err)
+					m.statusIsErr = true
+					return m, nil
+				}
+
+				if w.kind == wizardEdit && w.wasRunning {
+					m.clearConfirms()
+					m.confirmRestartAfterEdit = true
+					m.pendingRestartOld = oldInst
+					m.pendingRestartNewName = name
+					if oldInst != nil && oldInst.EnvFilePath != filepath.Join(w.instancesDir, name+".env") {
+						m.pendingDeleteEnvPath = oldInst.EnvFilePath
+					}
+					m.mode = ModeMain
+					m.statusMsg = "Saved. Restart container with new config? Press 'y' to confirm, 'n' to cancel"
+					m.statusIsErr = true
+					return m, m.reloadInstancesCmd()
+				}
+
 				m.mode = ModeMain
-				m.statusMsg = fmt.Sprintf("Instance '%s' created successfully!", w.inputs[0].Value())
+				if w.kind == wizardEdit {
+					m.statusMsg = fmt.Sprintf("Instance '%s' saved", name)
+				} else {
+					m.statusMsg = fmt.Sprintf("Instance '%s' created successfully!", name)
+				}
 				m.statusIsErr = false
 				return m, m.reloadInstancesCmd()
 			}
@@ -376,6 +493,19 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (w *wizardModel) nameTaken(name string) bool {
+	name = strings.TrimSpace(name)
+	for _, inst := range w.instances {
+		if inst.Name == name {
+			if w.kind == wizardEdit && name == w.sourceName {
+				continue
+			}
+			return true
+		}
+	}
+	return false
+}
+
 func (w *wizardModel) saveInstance() error {
 	name := strings.TrimSpace(w.inputs[0].Value())
 	containerName := strings.TrimSpace(w.inputs[1].Value())
@@ -423,8 +553,23 @@ SQLSERVER_VOLUME=%s
 `, runtime, containerName, containerName, memLimit, port, pass, db, volume)
 	}
 
-	filePath := filepath.Join(w.instancesDir, fmt.Sprintf("%s.env", name))
-	return os.WriteFile(filePath, []byte(content), 0644)
+	newPath := filepath.Join(w.instancesDir, fmt.Sprintf("%s.env", name))
+	if err := os.WriteFile(newPath, []byte(content), 0644); err != nil {
+		return err
+	}
+	if w.kind == wizardEdit && newPath != w.sourceEnvPath {
+		if w.wasRunning {
+			w.sourceEnvPath = newPath
+			w.sourceName = name
+		} else {
+			if err := os.Remove(w.sourceEnvPath); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			w.sourceEnvPath = newPath
+			w.sourceName = name
+		}
+	}
+	return nil
 }
 
 func (m *AppModel) wizardValueRow(inner int, label, value string, inputIdx int, extra string) string {
@@ -479,7 +624,13 @@ func (w *wizardModel) syncScrollToFocus() {
 
 func (w *wizardModel) wizardHintsLine(inner int) string {
 	if w.step == StepReview {
+		if w.kind == wizardEdit {
+			return surfaceLine(inner, RunningStyle.Render("All set! Press [Enter] to save, [↑/b] to edit, [o] external editor, or [Esc] to cancel."))
+		}
 		return surfaceLine(inner, RunningStyle.Render("All set! Press [Enter] to create the instance, [↑/b] to edit, or [Esc] to cancel."))
+	}
+	if w.kind == wizardEdit {
+		return surfaceLine(inner, MutedStyle.Render("[↑↓] rows  [←→] options  [Enter] next  [b] back  [o] external editor  [Esc] cancel"))
 	}
 	return surfaceLine(inner, MutedStyle.Render("[↑↓] rows  [←→] options  [Enter] next  [b] back  [Esc] cancel"))
 }
@@ -494,7 +645,11 @@ func (m *AppModel) viewWizardDock(innerWidth, dockHeight int) string {
 		w.inputs[i].Width = inputWidth
 	}
 
-	title := surfaceLine(innerWidth, TitleStyle.Render("New Database Instance"))
+	titleText := "New Database Instance"
+	if w.kind == wizardEdit {
+		titleText = "Edit Instance"
+	}
+	title := surfaceLine(innerWidth, TitleStyle.Render(titleText))
 	hints := w.wizardHintsLine(innerWidth)
 	// Title + hints are fixed; body scrolls in the remaining rows.
 	scrollHeight := dockHeight - 2

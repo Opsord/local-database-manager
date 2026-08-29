@@ -1,6 +1,8 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -92,6 +94,9 @@ func reviewModel(width, height int) *AppModel {
 func TestWizardNewModelStartsAtEngine(t *testing.T) {
 	t.Parallel()
 	w := newWizardModel("/tmp", "/tmp/instances", nil)
+	if w.kind != wizardCreate {
+		t.Fatalf("kind = %v, want wizardCreate", w.kind)
+	}
 	if w.step != StepEngine {
 		t.Fatalf("step = %v, want StepEngine", w.step)
 	}
@@ -488,5 +493,440 @@ func TestWizardReviewFillsSurface(t *testing.T) {
 	const maxUnpainted = 80
 	if got > maxUnpainted {
 		t.Fatalf("wizard review unpainted cells=%d want <= %d", got, maxUnpainted)
+	}
+}
+
+func TestEditWizardPrefillsFromInstance(t *testing.T) {
+	t.Parallel()
+	inst := &core.DatabaseInstance{
+		Name: "shop", EngineType: "postgres", Runtime: "podman",
+		ContainerName: "pg-shop", Port: 5433, Database: "shop_db",
+		Password: "s3cret", Volume: "pgdata_shop", MemoryLimit: "1G",
+		EnvFilePath: "/tmp/instances/shop.env",
+		Status:      core.StatusStopped,
+	}
+	w := newEditWizardModel("/tmp", "/tmp/instances", []*core.DatabaseInstance{inst}, inst)
+	if w.kind != wizardEdit {
+		t.Fatalf("kind=%v", w.kind)
+	}
+	if w.inputs[0].Value() != "shop" {
+		t.Fatalf("name=%q", w.inputs[0].Value())
+	}
+	if w.engines[w.selectedEngineIdx] != "postgres" {
+		t.Fatal("engine")
+	}
+	if w.runtimes[w.selectedRuntimeIdx] != "podman" {
+		t.Fatal("runtime")
+	}
+	if w.inputs[2].Value() != "5433" || w.inputs[5].Value() != "s3cret" {
+		t.Fatalf("port/pass not prefilled")
+	}
+	if w.sourceName != "shop" || w.sourceEnvPath != "/tmp/instances/shop.env" {
+		t.Fatalf("source snapshot missing: name=%q path=%q", w.sourceName, w.sourceEnvPath)
+	}
+	if w.sourceRuntime != "podman" || w.sourceContainerName != "pg-shop" {
+		t.Fatalf("source runtime/container snapshot missing")
+	}
+
+	ready := &core.DatabaseInstance{Name: "live", Status: core.StatusReady}
+	wReady := newEditWizardModel("/tmp", "/tmp/instances", nil, ready)
+	if !wReady.wasRunning {
+		t.Fatal("wasRunning should be true for READY status")
+	}
+}
+
+func TestEditWizardNameUniquenessAllowsSelf(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	existing := []*core.DatabaseInstance{{Name: "shop"}, {Name: "other"}}
+	inst := &core.DatabaseInstance{Name: "shop", EngineType: "postgres", Runtime: "docker",
+		ContainerName: "pg-shop", Port: 5432, Database: "db", Password: "p", Volume: "v", MemoryLimit: "512M",
+		EnvFilePath: filepath.Join(dir, "shop.env")}
+	_ = os.WriteFile(inst.EnvFilePath, []byte("ENGINE=postgres\n"), 0644)
+	w := newEditWizardModel("/tmp", dir, existing, inst)
+	if w.nameTaken("shop") {
+		t.Fatal("self name must be allowed")
+	}
+	if !w.nameTaken("other") {
+		t.Fatal("other name must be taken")
+	}
+}
+
+func TestEditWizardRenameWritesNewDeletesOld(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	oldPath := filepath.Join(dir, "shop.env")
+	_ = os.WriteFile(oldPath, []byte("ENGINE=postgres\n"), 0644)
+	inst := &core.DatabaseInstance{
+		Name: "shop", EngineType: "postgres", Runtime: "docker",
+		ContainerName: "pg-shop", Port: 5432, Database: "db", Password: "p",
+		Volume: "v", MemoryLimit: "512M", EnvFilePath: oldPath,
+		Status: core.StatusStopped,
+	}
+	w := newEditWizardModel("/tmp", dir, []*core.DatabaseInstance{inst}, inst)
+	w.inputs[0].SetValue("shop2")
+	w.inputs[1].SetValue("pg-shop2")
+	if err := w.saveInstance(); err != nil {
+		t.Fatal(err)
+	}
+	newPath := filepath.Join(dir, "shop2.env")
+	if _, err := os.Stat(newPath); err != nil {
+		t.Fatal("expected new env")
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatal("expected old env removed when not running")
+	}
+}
+
+func TestEditWizardRenameWhileRunningDefersOldDelete(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	oldPath := filepath.Join(dir, "shop.env")
+	_ = os.WriteFile(oldPath, []byte("ENGINE=postgres\n"), 0644)
+	inst := &core.DatabaseInstance{
+		Name: "shop", EngineType: "postgres", Runtime: "docker",
+		ContainerName: "pg-shop", Port: 5432, Database: "db", Password: "p",
+		Volume: "v", MemoryLimit: "512M", EnvFilePath: oldPath,
+		Status: core.StatusReady,
+	}
+	w := newEditWizardModel("/tmp", dir, []*core.DatabaseInstance{inst}, inst)
+	w.wasRunning = true
+	w.inputs[0].SetValue("shop2")
+	w.inputs[1].SetValue("pg-shop2")
+	if err := w.saveInstance(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "shop2.env")); err != nil {
+		t.Fatal("expected new env")
+	}
+	if _, err := os.Stat(oldPath); err != nil {
+		t.Fatal("expected old env kept until restart completes or confirm cancelled")
+	}
+}
+
+func TestEditWizardNameAdvanceDoesNotAutofill(t *testing.T) {
+	t.Parallel()
+	inst := &core.DatabaseInstance{
+		Name: "shop", EngineType: "postgres", Runtime: "docker",
+		ContainerName: "pg-shop", Port: 5433, Database: "shop_db",
+		Password: "s3cret", Volume: "pgdata_shop", MemoryLimit: "512M",
+		EnvFilePath: "/tmp/instances/shop.env",
+	}
+	w := newEditWizardModel("/tmp", "/tmp/instances", []*core.DatabaseInstance{inst}, inst)
+	w.step = StepName
+	if !w.confirmAdvance() {
+		t.Fatal("expected advance")
+	}
+	if w.inputs[2].Value() != "5433" {
+		t.Fatalf("port=%q, want 5433 unchanged", w.inputs[2].Value())
+	}
+	if w.inputs[1].Value() != "pg-shop" {
+		t.Fatalf("container=%q, want pg-shop unchanged", w.inputs[1].Value())
+	}
+}
+
+func TestActionEditOpensEditWizard(t *testing.T) {
+	t.Parallel()
+	m := NewApp("/tmp", config.Config{EngineHealthInterval: time.Second})
+	m.width, m.height = 120, 32
+	m.mode = ModeActionMenu
+	m.instances = []*core.DatabaseInstance{{
+		Name: "demo", EngineType: "postgres", Runtime: "docker",
+		ContainerName: "pg-demo", Port: 5432, Database: "demo",
+		Password: "x", Volume: "v", MemoryLimit: "512M",
+		Status: core.StatusStopped,
+	}}
+	m.selectedIndex = 0
+	items := m.getActionMenuItems(m.instances[0])
+	editIdx := -1
+	for i, it := range items {
+		if it.label == "Edit Instance" {
+			editIdx = i
+			break
+		}
+	}
+	if editIdx < 0 {
+		t.Fatal("Edit Instance action missing")
+	}
+	m.actionMenuIndex = editIdx
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	am := updated.(*AppModel)
+	if am.mode != ModeWizard || am.wizard.kind != wizardEdit {
+		t.Fatalf("mode=%v kind=%v", am.mode, am.wizard.kind)
+	}
+	plain := stripANSI(am.View())
+	if !strings.Contains(plain, "Edit Instance") {
+		t.Fatalf("expected edit title:\n%s", plain)
+	}
+}
+
+func TestEditSaveWhenRunningArmsRestartConfirm(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "shop.env")
+	content := `ENGINE=postgres
+RUNTIME=docker
+CONTAINER_NAME=pg-shop
+COMPOSE_PROJECT_NAME=pg-shop
+MEMORY_LIMIT=512M
+POSTGRES_PORT=5432
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=p
+POSTGRES_DB=db
+POSTGRES_VOLUME=v
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	inst, err := core.ParseEnvFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst.Status = core.StatusReady
+
+	m := NewApp(filepath.Dir(dir), config.Config{EngineHealthInterval: time.Second})
+	m.instancesDir = dir
+	m.instances = []*core.DatabaseInstance{inst}
+	m.selectedIndex = 0
+	m.mode = ModeWizard
+	m.wizard = newEditWizardModel(m.projectRoot, dir, m.instances, inst)
+	m.wizard.step = StepReview
+	m.wizard.maxReached = StepReview
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	am := updated.(*AppModel)
+	if !am.confirmRestartAfterEdit {
+		t.Fatal("expected restart confirm armed")
+	}
+	if am.mode != ModeMain {
+		t.Fatalf("expected main after save, got %v", am.mode)
+	}
+	if am.pendingRestartOld == nil || am.pendingRestartOld.Name != "shop" {
+		t.Fatalf("pendingRestartOld=%v", am.pendingRestartOld)
+	}
+	if am.pendingRestartNewName != "shop" {
+		t.Fatalf("pendingRestartNewName=%q", am.pendingRestartNewName)
+	}
+	if cmd == nil {
+		t.Fatal("expected reload cmd")
+	}
+}
+
+func TestEditRestartConfirmYesStopsThenStarts(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	newPath := filepath.Join(dir, "new.env")
+	content := `ENGINE=postgres
+RUNTIME=docker
+CONTAINER_NAME=pg-new
+COMPOSE_PROJECT_NAME=pg-new
+MEMORY_LIMIT=512M
+POSTGRES_PORT=5432
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=p
+POSTGRES_DB=db
+POSTGRES_VOLUME=v
+`
+	if err := os.WriteFile(newPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	sr := &stubRunner{}
+	m := NewApp("/tmp", config.Config{EngineHealthInterval: time.Second})
+	m.instancesDir = dir
+	m.runner = sr
+	m.confirmRestartAfterEdit = true
+	m.pendingRestartOld = &core.DatabaseInstance{
+		Name: "old", Runtime: "docker", ProjectName: "pg-old",
+		EnvFilePath: "/tmp/old.env", ContainerName: "pg-old",
+	}
+	m.pendingRestartNewName = "new"
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	am := updated.(*AppModel)
+	if am.confirmRestartAfterEdit {
+		t.Fatal("confirm should clear")
+	}
+	if cmd == nil {
+		t.Fatal("expected restart cmd")
+	}
+	msg := cmd()
+	if _, ok := msg.(restartAfterEditDoneMsg); !ok {
+		t.Fatalf("got %T, want restartAfterEditDoneMsg", msg)
+	}
+	if sr.lastStopInst == nil || sr.lastStopInst.Name != "old" {
+		t.Fatalf("lastStopInst=%v", sr.lastStopInst)
+	}
+	if sr.lastStartInst == nil || sr.lastStartInst.Name != "new" {
+		t.Fatalf("lastStartInst=%v", sr.lastStartInst)
+	}
+}
+
+func TestEditRestartConfirmNoClears(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	oldPath := filepath.Join(dir, "shop.env")
+	_ = os.WriteFile(oldPath, []byte("ENGINE=postgres\n"), 0644)
+
+	m := NewApp("/tmp", config.Config{EngineHealthInterval: time.Second})
+	m.confirmRestartAfterEdit = true
+	m.pendingRestartOld = &core.DatabaseInstance{Name: "old"}
+	m.pendingRestartNewName = "new"
+	m.pendingDeleteEnvPath = oldPath
+	m.statusMsg = "Saved. Restart container with new config? Press 'y' to confirm, 'n' to cancel"
+	m.statusIsErr = true
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	am := updated.(*AppModel)
+	if am.confirmRestartAfterEdit {
+		t.Fatal("confirm should clear")
+	}
+	if am.pendingRestartOld != nil {
+		t.Fatal("pendingRestartOld should be nil")
+	}
+	if am.pendingDeleteEnvPath != "" {
+		t.Fatal("pendingDeleteEnvPath should be cleared")
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatal("expected deferred old env removed on cancel")
+	}
+	if am.mode == ModeWizard {
+		t.Fatal("cancel should not open wizard")
+	}
+	if cmd == nil {
+		t.Fatal("expected status clear tick")
+	}
+}
+
+func TestEditRenameRunningRestartStopsOldEnvThenDeletes(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	oldPath := filepath.Join(dir, "shop.env")
+	oldContent := `ENGINE=postgres
+RUNTIME=docker
+CONTAINER_NAME=pg-shop
+COMPOSE_PROJECT_NAME=pg-shop
+MEMORY_LIMIT=512M
+POSTGRES_PORT=5432
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=p
+POSTGRES_DB=db
+POSTGRES_VOLUME=v
+`
+	if err := os.WriteFile(oldPath, []byte(oldContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	inst, err := core.ParseEnvFile(oldPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst.Status = core.StatusReady
+
+	m := NewApp(filepath.Dir(dir), config.Config{EngineHealthInterval: time.Second})
+	m.instancesDir = dir
+	m.instances = []*core.DatabaseInstance{inst}
+	m.selectedIndex = 0
+	m.mode = ModeWizard
+	m.wizard = newEditWizardModel(m.projectRoot, dir, m.instances, inst)
+	m.wizard.step = StepReview
+	m.wizard.maxReached = StepReview
+	m.wizard.inputs[0].SetValue("shop2")
+	m.wizard.inputs[1].SetValue("pg-shop2")
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	am := updated.(*AppModel)
+	if !am.confirmRestartAfterEdit {
+		t.Fatal("expected restart confirm armed")
+	}
+	if am.pendingDeleteEnvPath != oldPath {
+		t.Fatalf("pendingDeleteEnvPath=%q, want %q", am.pendingDeleteEnvPath, oldPath)
+	}
+	if _, err := os.Stat(oldPath); err != nil {
+		t.Fatal("old env must still exist before restart Stop")
+	}
+
+	sr := &stubRunner{}
+	am.runner = sr
+	updated, cmd := am.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	am = updated.(*AppModel)
+	if cmd == nil {
+		t.Fatal("expected restart cmd")
+	}
+	if _, err := os.Stat(oldPath); err != nil {
+		t.Fatal("old env must still exist at Stop time")
+	}
+	msg := cmd()
+	done, ok := msg.(restartAfterEditDoneMsg)
+	if !ok {
+		t.Fatalf("got %T, want restartAfterEditDoneMsg", msg)
+	}
+	if done.err != nil {
+		t.Fatalf("unexpected restart error: %v", done.err)
+	}
+	if sr.lastStopInst == nil || sr.lastStopInst.EnvFilePath != oldPath {
+		t.Fatalf("Stop env path=%q, want %q", sr.lastStopInst.EnvFilePath, oldPath)
+	}
+	if sr.lastStopInst.ProjectName != "pg-shop" {
+		t.Fatalf("Stop project=%q, want pg-shop", sr.lastStopInst.ProjectName)
+	}
+	if sr.lastStartInst == nil || sr.lastStartInst.Name != "shop2" {
+		t.Fatalf("Start inst=%v", sr.lastStartInst)
+	}
+	if _, err := os.Stat(oldPath); err != nil {
+		t.Fatal("old env should remain until restart success is handled")
+	}
+
+	updated, reloadCmd := am.Update(done)
+	am = updated.(*AppModel)
+	if am.pendingDeleteEnvPath != "" {
+		t.Fatal("pendingDeleteEnvPath should be cleared after success")
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatal("expected old env removed after successful restart")
+	}
+	if reloadCmd == nil {
+		t.Fatal("expected reload cmd after restart success")
+	}
+}
+
+func TestEditRestartFailureReloadsInstances(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	newPath := filepath.Join(dir, "new.env")
+	_ = os.WriteFile(newPath, []byte(`ENGINE=postgres
+RUNTIME=docker
+CONTAINER_NAME=pg-new
+COMPOSE_PROJECT_NAME=pg-new
+MEMORY_LIMIT=512M
+POSTGRES_PORT=5432
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=p
+POSTGRES_DB=db
+POSTGRES_VOLUME=v
+`), 0644)
+
+	sr := &stubRunner{startErr: os.ErrInvalid}
+	m := NewApp("/tmp", config.Config{EngineHealthInterval: time.Second})
+	m.instancesDir = dir
+	m.runner = sr
+	m.confirmRestartAfterEdit = true
+	m.pendingRestartOld = &core.DatabaseInstance{
+		Name: "old", Runtime: "docker", ProjectName: "pg-old",
+		EnvFilePath: "/tmp/old.env", ContainerName: "pg-old",
+	}
+	m.pendingRestartNewName = "new"
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	am := updated.(*AppModel)
+	msg := cmd().(restartAfterEditDoneMsg)
+	if msg.err == nil {
+		t.Fatal("expected restart error")
+	}
+	updated, reloadCmd := am.Update(msg)
+	if reloadCmd == nil {
+		t.Fatal("expected reload cmd on restart failure")
+	}
+	if updated.(*AppModel).statusIsErr != true {
+		t.Fatal("expected error status")
 	}
 }

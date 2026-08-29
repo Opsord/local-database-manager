@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -110,4 +111,99 @@ func TestRunner_Start_OfflineError(t *testing.T) {
 	if !errors.Is(err, ErrEngineNotInstalled) {
 		t.Errorf("expected error to wrap ErrEngineNotInstalled, got %v", err)
 	}
+}
+
+func TestRunner_StartEngine_NotInstalled(t *testing.T) {
+	t.Parallel()
+	r := NewRunner("/tmp")
+	err := r.StartEngine(context.Background(), "nonexistent_runtime_binary_xyz")
+	if !errors.Is(err, ErrEngineNotInstalled) {
+		t.Fatalf("got %v, want ErrEngineNotInstalled", err)
+	}
+}
+
+func TestRunner_StartEngine_AlreadyOnlineIsNoop(t *testing.T) {
+	t.Parallel()
+	// Skip if neither docker nor podman is online on this machine.
+	r := NewRunner("/tmp")
+	ctx := context.Background()
+	for _, rt := range []string{"docker", "podman"} {
+		if r.CheckEngineHealth(ctx, rt) != EngineOnline {
+			continue
+		}
+		if err := r.StartEngine(ctx, rt); err != nil {
+			t.Fatalf("online %s StartEngine = %v, want nil", rt, err)
+		}
+		return
+	}
+	t.Skip("no online docker/podman to assert no-op")
+}
+
+func TestWaitUntilOnline_TimesOut(t *testing.T) {
+	t.Parallel()
+	r := NewRunner("/tmp")
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err := r.waitUntilOnline(ctx, "nonexistent_runtime_binary_xyz")
+	if err == nil {
+		t.Fatal("expected timeout/error")
+	}
+	if !errors.Is(err, ErrEngineStartFailed) && !errors.Is(err, context.DeadlineExceeded) {
+		t.Logf("got err=%v", err)
+	}
+}
+
+func TestFindDockerDesktopExe_Windows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows only")
+	}
+	_, err := findDockerDesktopExe()
+	_ = err // existence depends on machine; just ensure it doesn't panic
+}
+
+func TestRunner_StopEngine_NotInstalled(t *testing.T) {
+	t.Parallel()
+	r := NewRunner("/tmp")
+	err := r.StopEngine(context.Background(), "nonexistent_runtime_binary_xyz")
+	if !errors.Is(err, ErrEngineNotInstalled) {
+		t.Fatalf("got %v, want ErrEngineNotInstalled", err)
+	}
+}
+
+func TestWaitUntilOffline_TimesOut(t *testing.T) {
+	t.Parallel()
+	r := NewRunner("/tmp")
+	ctx := context.Background()
+	if r.CheckEngineHealth(ctx, "docker") != EngineOnline {
+		t.Skip("docker not online; cannot test waitUntilOffline timeout")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer cancel()
+	err := r.waitUntilOffline(ctx, "docker")
+	if err == nil {
+		t.Fatal("expected timeout/error")
+	}
+	if !errors.Is(err, ErrEngineStartFailed) && !errors.Is(err, context.DeadlineExceeded) {
+		t.Logf("got err=%v", err)
+	}
+}
+
+func TestRunner_StopEngine_AlreadyOfflineIsNoop(t *testing.T) {
+	t.Parallel()
+	r := NewRunner("/tmp")
+	ctx := context.Background()
+	for _, rt := range []string{"docker", "podman"} {
+		h := r.CheckEngineHealth(ctx, rt)
+		if h != EngineOffline && h != EngineNotInstalled {
+			continue
+		}
+		if h == EngineNotInstalled {
+			continue
+		}
+		if err := r.StopEngine(ctx, rt); err != nil {
+			t.Fatalf("offline %s StopEngine = %v, want nil", rt, err)
+		}
+		return
+	}
+	t.Skip("no offline docker/podman to assert no-op")
 }

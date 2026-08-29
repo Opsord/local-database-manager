@@ -84,19 +84,13 @@ func (m *AppModel) getActionMenuItems(inst *core.DatabaseInstance) []actionMenuI
 			},
 		},
 		{
-			label:       "Edit .env Configuration",
-			description: "Open instance environment file in default editor",
-			shortcut:    "e",
+			label:       "Edit Instance",
+			description: "Edit instance settings in the docked wizard",
+			shortcut:    "",
 			action: func(m *AppModel, inst *core.DatabaseInstance) (tea.Model, tea.Cmd) {
-				m.mode = ModeMain
-				if err := core.OpenInEditor(inst.EnvFilePath); err != nil {
-					m.statusMsg = fmt.Sprintf("Failed to open editor: %v", err)
-					m.statusIsErr = true
-				} else {
-					m.statusMsg = fmt.Sprintf("Opening %s in editor...", inst.Name)
-					m.statusIsErr = false
-				}
-				return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
+				m.mode = ModeWizard
+				m.wizard = newEditWizardModel(m.projectRoot, m.instancesDir, m.instances, inst)
+				return m, nil
 			},
 		},
 		{
@@ -105,6 +99,7 @@ func (m *AppModel) getActionMenuItems(inst *core.DatabaseInstance) []actionMenuI
 			shortcut:    "d",
 			action: func(m *AppModel, inst *core.DatabaseInstance) (tea.Model, tea.Cmd) {
 				m.mode = ModeMain
+				m.clearConfirms()
 				m.confirmPurge = true
 				m.statusMsg = fmt.Sprintf("Purge container and volume for '%s'? Press 'y' to confirm, 'n' to cancel", inst.Name)
 				m.statusIsErr = true
@@ -169,47 +164,62 @@ func actionMenuItemMatchesKey(item actionMenuItem, key string) bool {
 	return item.shortcut == key
 }
 
-func (m *AppModel) viewActionMenu() string {
+func (m *AppModel) viewActionDock(innerWidth, dockHeight int) string {
 	inst := m.selectedInstance()
 	if inst == nil {
 		return ""
 	}
 
 	items := m.getActionMenuItems(inst)
-	modalWidth := m.width - 12
-	if modalWidth < 50 {
-		modalWidth = 50
-	}
-	if modalWidth > 75 {
-		modalWidth = 75
+	title := surfaceLine(innerWidth, TitleStyle.Render(fmt.Sprintf("Actions: %s (%s)", inst.Name, inst.EngineType)))
+	hints := surfaceLine(innerWidth, MutedStyle.Render("Use [↑/↓] to navigate, [Enter] to execute, [Esc] to return."))
+
+	bodyHeight := dockHeight - 2
+	if bodyHeight < 1 {
+		bodyHeight = 1
 	}
 
-	var content []string
-	content = append(content, TitleStyle.Render(fmt.Sprintf("Actions: %s (%s)", inst.Name, inst.EngineType)))
-	content = append(content, SeparatorStyle.Render(strings.Repeat("─", modalWidth-4)))
-	content = append(content, surfaceGap(1))
-
+	// Styled label + muted description (like Details LabelStyle). Every fragment
+	// shares the row background so SGR resets do not punch black holes.
+	var rowLines []string
 	for i, item := range items {
-		shortcutBadge := lipgloss.NewStyle().Foreground(AccentColor).Background(BgSurface).Render(fmt.Sprintf("[%s]", item.shortcut))
-		labelStr := lipgloss.NewStyle().Bold(true).Foreground(FgText).Background(BgSurface).Render(item.label)
-		descStr := MutedStyle.Render(" — " + item.description)
-		itemText := fmt.Sprintf("%s  %s  %s", labelStr, shortcutBadge, descStr)
-
-		var line string
-		if i == m.actionMenuIndex {
-			line = SelectedItemStyle.Width(modalWidth - 4).Render("> " + itemText)
-		} else {
-			line = NormalItemStyle.Render("  " + itemText)
+		selected := i == m.actionMenuIndex
+		bg := BgSurface
+		if selected {
+			bg = SelectedBg
 		}
-		content = append(content, line)
+		gap := lipgloss.NewStyle().Background(bg).Render("  ")
+		prefix := "  "
+		if selected {
+			prefix = "> "
+		}
+		label := lipgloss.NewStyle().Bold(true).Foreground(FgText).Background(bg).Render(prefix + item.label)
+		desc := lipgloss.NewStyle().Foreground(MutedColor).Background(bg).Render("— " + item.description)
+		parts := []string{label}
+		if item.shortcut != "" {
+			badge := lipgloss.NewStyle().Foreground(AccentColor).Background(bg).Render(fmt.Sprintf("[%s]", item.shortcut))
+			parts = append(parts, badge)
+		}
+		parts = append(parts, desc)
+		content := parts[0]
+		for _, p := range parts[1:] {
+			content = lipgloss.JoinHorizontal(lipgloss.Top, content, gap, p)
+		}
+		rowLines = append(rowLines, lipgloss.NewStyle().
+			Width(innerWidth).
+			MaxWidth(innerWidth).
+			Background(bg).
+			Render(content))
 	}
 
-	content = append(content, surfaceGap(1))
-	content = append(content, MutedStyle.Render("Use [↑/↓] to navigate, [Enter] to execute, [Esc] to return."))
+	body := lipgloss.NewStyle().
+		Width(innerWidth).
+		Height(bodyHeight).
+		MaxHeight(bodyHeight).
+		Background(BgSurface).
+		Render(lipgloss.JoinVertical(lipgloss.Left, rowLines...))
 
-	return ActivePanelStyle.
-		Width(modalWidth).
-		Render(lipgloss.JoinVertical(lipgloss.Left, content...))
+	return lipgloss.JoinVertical(lipgloss.Left, title, body, hints)
 }
 
 func (m *AppModel) updateHelp(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -240,14 +250,16 @@ func (m *AppModel) viewHelp() string {
 
 	helpItems := [][]string{
 		{"[↑ / ↓] / [k / j]", "Navigate through database instances"},
-		{"[Enter]", "Open Action Menu (Command Palette) for selected instance"},
+		{"[Enter]", "Dock Action Menu in bottom-right panel (Start/Stop, Copy URI, Logs, Edit Instance, Purge)"},
+		{"[Edit Instance]", "Docked wizard (from Action Menu); [o] opens external editor"},
+		{"[y / n]", "Confirm restart after saving edits to a running instance"},
 		{"[/]", "Live Search / Filter instances in real-time"},
 		{"[Space]", "Start or Stop container instance"},
 		{"[c]", "Copy connection URI to clipboard"},
 		{"[E / x]", "Copy backend .env configuration block to clipboard"},
 		{"[l]", "Open live log streamer for selected container"},
 		{"[n]", "Create new database instance with step-by-step wizard"},
-		{"[e]", "Edit .env file in default system editor (VS Code, Notepad, etc.)"},
+		{"[e]", "Dock Engines panel (left) — Start offline; Stop online (y/n confirm)"},
 		{"[d]", "Purge instance container and wipe persistent volume (down -v)"},
 		{"[r]", "Reload instances & recheck Docker / Podman daemon health"},
 		{"[?]", "Toggle this help reference screen"},

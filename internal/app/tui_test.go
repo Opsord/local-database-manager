@@ -13,8 +13,12 @@ import (
 )
 
 type stubRunner struct {
-	docker core.EngineHealth
-	podman core.EngineHealth
+	docker                 core.EngineHealth
+	podman                 core.EngineHealth
+	startErr               error
+	lastStartEngineRuntime string
+	lastStopInst           *core.DatabaseInstance
+	lastStartInst          *core.DatabaseInstance
 }
 
 func (s *stubRunner) CheckEngineHealth(_ context.Context, runtimeName string) core.EngineHealth {
@@ -24,8 +28,22 @@ func (s *stubRunner) CheckEngineHealth(_ context.Context, runtimeName string) co
 	return s.docker
 }
 
-func (s *stubRunner) Start(context.Context, *core.DatabaseInstance) error { return nil }
-func (s *stubRunner) Stop(context.Context, *core.DatabaseInstance) error  { return nil }
+func (s *stubRunner) StartEngine(_ context.Context, runtime string) error {
+	s.lastStartEngineRuntime = runtime
+	return nil
+}
+func (s *stubRunner) StopEngine(context.Context, string) error { return nil }
+func (s *stubRunner) Start(_ context.Context, inst *core.DatabaseInstance) error {
+	s.lastStartInst = inst
+	if s.startErr != nil {
+		return s.startErr
+	}
+	return nil
+}
+func (s *stubRunner) Stop(_ context.Context, inst *core.DatabaseInstance) error {
+	s.lastStopInst = inst
+	return nil
+}
 func (s *stubRunner) DownVolumes(context.Context, *core.DatabaseInstance) error {
 	return nil
 }
