@@ -35,6 +35,7 @@ type DatabaseInstance struct {
 	Password      string            `json:"password"`
 	Schema        string            `json:"schema"`
 	Volume        string            `json:"volume"`
+	Version       string            `json:"version"`
 	Status        ContainerStatus   `json:"status"`
 	MemoryUsage   string            `json:"memory_usage"`
 	MemoryLimit   string            `json:"memory_limit"`
@@ -171,6 +172,7 @@ func ParseEnvFile(filePath string) (*DatabaseInstance, error) {
 			schema = "public"
 		}
 		inst.Schema = schema
+		inst.Version = NormalizePostgresVersion(rawEnv["POSTGRES_VERSION"])
 		inst.Volume = rawEnv["POSTGRES_VOLUME"]
 
 	case "sqlserver":

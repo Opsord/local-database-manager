@@ -132,3 +132,54 @@ SQLSERVER_VOLUME=sql_orders_data
 		t.Errorf("BackendEnvBlock failed: got '%s'", envBlock)
 	}
 }
+
+func TestParseEnvFile_PostgresVersionDefault(t *testing.T) {
+	tmpDir := t.TempDir()
+	envPath := filepath.Join(tmpDir, "legacy.env")
+	content := `ENGINE=postgres
+RUNTIME=docker
+CONTAINER_NAME=pg-legacy
+COMPOSE_PROJECT_NAME=pg-legacy
+POSTGRES_PORT=5432
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=p
+POSTGRES_DB=db
+POSTGRES_VOLUME=pgdata_legacy
+`
+	if err := os.WriteFile(envPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	inst, err := ParseEnvFile(envPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst.Version != DefaultPostgresVersion {
+		t.Fatalf("Version=%q, want %q", inst.Version, DefaultPostgresVersion)
+	}
+}
+
+func TestParseEnvFile_PostgresVersionExplicit(t *testing.T) {
+	tmpDir := t.TempDir()
+	envPath := filepath.Join(tmpDir, "v16.env")
+	content := `ENGINE=postgres
+RUNTIME=docker
+CONTAINER_NAME=pg-v16
+COMPOSE_PROJECT_NAME=pg-v16
+POSTGRES_VERSION=16
+POSTGRES_PORT=5432
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=p
+POSTGRES_DB=db
+POSTGRES_VOLUME=pgdata_v16_16
+`
+	if err := os.WriteFile(envPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	inst, err := ParseEnvFile(envPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst.Version != "16" {
+		t.Fatalf("Version=%q, want 16", inst.Version)
+	}
+}
