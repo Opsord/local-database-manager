@@ -122,6 +122,16 @@ func TestRunner_StartEngine_NotInstalled(t *testing.T) {
 	}
 }
 
+func TestIsPodmanMachineAlreadyRunning(t *testing.T) {
+	t.Parallel()
+	if !isPodmanMachineAlreadyRunning("Error: unable to start \"podman-machine-default\": already running") {
+		t.Fatal("expected already running detection")
+	}
+	if isPodmanMachineAlreadyRunning("some other error") {
+		t.Fatal("should not match unrelated stderr")
+	}
+}
+
 func TestRunner_StartEngine_AlreadyOnlineIsNoop(t *testing.T) {
 	t.Parallel()
 	// Skip if neither docker nor podman is online on this machine.

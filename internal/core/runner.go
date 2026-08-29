@@ -157,18 +157,46 @@ func (r *Runner) waitUntilOffline(ctx context.Context, runtimeName string) error
 	}
 }
 
+func isPodmanMachineAlreadyRunning(stderr string) bool {
+	return strings.Contains(strings.ToLower(stderr), "already running")
+}
+
+func (r *Runner) execPodmanMachine(ctx context.Context, subcmd string) (stderr string, err error) {
+	cmd := exec.CommandContext(ctx, "podman", "machine", subcmd)
+	var errBuf bytes.Buffer
+	cmd.Stdout = io.Discard
+	cmd.Stderr = &errBuf
+	err = cmd.Run()
+	return strings.TrimSpace(errBuf.String()), err
+}
+
 func (r *Runner) startPodmanMachine(ctx context.Context) error {
 	cmdCtx, cancel := context.WithTimeout(ctx, engineStartTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(cmdCtx, "podman", "machine", "start")
-	var stderr bytes.Buffer
-	cmd.Stdout = io.Discard
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if r.CheckEngineHealth(context.Background(), "podman") == EngineOnline {
+
+	stderr, err := r.execPodmanMachine(cmdCtx, "start")
+	if err != nil {
+		if r.CheckEngineHealth(cmdCtx, "podman") == EngineOnline {
 			return nil
 		}
-		return fmt.Errorf("%w: podman machine start: %v (%s)", ErrEngineStartFailed, err, strings.TrimSpace(stderr.String()))
+		// Windows/WSL: machine reports "running" but podman info cannot connect
+		// (stale SSH/socket). podman machine start then returns "already running".
+		if isPodmanMachineAlreadyRunning(stderr) {
+			if _, stopErr := r.execPodmanMachine(cmdCtx, "stop"); stopErr != nil {
+				if r.CheckEngineHealth(cmdCtx, "podman") == EngineOnline {
+					return nil
+				}
+			}
+			stderr, err = r.execPodmanMachine(cmdCtx, "start")
+			if err != nil {
+				if r.CheckEngineHealth(cmdCtx, "podman") == EngineOnline {
+					return nil
+				}
+				return fmt.Errorf("%w: podman machine restart after stuck state: %v (%s)", ErrEngineStartFailed, err, stderr)
+			}
+		} else {
+			return fmt.Errorf("%w: podman machine start: %v (%s)", ErrEngineStartFailed, err, stderr)
+		}
 	}
 	return r.waitUntilOnline(cmdCtx, "podman")
 }

@@ -70,9 +70,6 @@ func engineStartStatusMsg(engineRuntime string) string {
 	if engineRuntime == "podman" {
 		return "Starting Podman machine..."
 	}
-	if runtime.GOOS == "windows" {
-		return "Starting Docker Desktop..."
-	}
 	return "Starting Docker..."
 }
 
@@ -205,19 +202,25 @@ func (m *AppModel) viewEngineDock(innerWidth, dockHeight int) string {
 
 	var rowLines []string
 	for i, row := range rows {
-		var label string
+		selected := i == m.engineMenuIndex
+		bg := BgSurface
+		if selected {
+			bg = SelectedBg
+		}
+		prefix := "  "
+		if selected {
+			prefix = "> "
+		}
+		labelStyle := lipgloss.NewStyle().Foreground(MutedColor).Background(bg)
 		if row.actionable {
-			label = lipgloss.NewStyle().Bold(true).Foreground(FgText).Background(BgSurface).Render(row.label)
-		} else {
-			label = MutedStyle.Render(row.label)
+			labelStyle = lipgloss.NewStyle().Bold(true).Foreground(FgText).Background(bg)
 		}
-		var line string
-		if i == m.engineMenuIndex {
-			line = SelectedItemStyle.Width(innerWidth).Render("> " + label)
-		} else {
-			line = NormalItemStyle.Render("  " + label)
-		}
-		rowLines = append(rowLines, line)
+		content := labelStyle.Render(prefix + row.label)
+		rowLines = append(rowLines, lipgloss.NewStyle().
+			Width(innerWidth).
+			MaxWidth(innerWidth).
+			Background(bg).
+			Render(content))
 	}
 
 	body := lipgloss.NewStyle().

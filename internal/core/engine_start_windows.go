@@ -12,17 +12,28 @@ import (
 )
 
 func (r *Runner) startDockerEngine(ctx context.Context) error {
-	exe, err := findDockerDesktopExe()
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrEngineStartFailed, err)
-	}
-	cmd := exec.Command(exe)
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("%w: launch Docker Desktop: %v", ErrEngineStartFailed, err)
-	}
-	_ = cmd.Process.Release()
 	cmdCtx, cancel := context.WithTimeout(ctx, engineStartTimeout)
 	defer cancel()
+
+	// Prefer CLI start (less UI than launching the .exe). Fall back to the
+	// Desktop executable when the CLI plugin is missing or fails to start.
+	startCmd := exec.CommandContext(cmdCtx, "docker", "desktop", "start")
+	startCmd.Stdout = io.Discard
+	startCmd.Stderr = io.Discard
+	if err := startCmd.Run(); err != nil {
+		if r.CheckEngineHealth(cmdCtx, "docker") == EngineOnline {
+			return nil
+		}
+		exe, findErr := findDockerDesktopExe()
+		if findErr != nil {
+			return fmt.Errorf("%w: docker desktop start: %v (%v)", ErrEngineStartFailed, err, findErr)
+		}
+		cmd := exec.Command(exe)
+		if startErr := cmd.Start(); startErr != nil {
+			return fmt.Errorf("%w: launch Docker Desktop: %v (cli start: %v)", ErrEngineStartFailed, startErr, err)
+		}
+		_ = cmd.Process.Release()
+	}
 	return r.waitUntilOnline(cmdCtx, "docker")
 }
 
@@ -30,19 +41,13 @@ func (r *Runner) stopDockerEngine(ctx context.Context) error {
 	cmdCtx, cancel := context.WithTimeout(ctx, engineStartTimeout)
 	defer cancel()
 
-	// Best-effort graceful quit via Docker CLI (available while daemon is online).
+	// Only use the Docker CLI. Launching "Docker Desktop.exe --quit" can spawn a
+	// new Desktop process that reopens the tray/dashboard while the backend is
+	// still shutting down.
 	stopCmd := exec.CommandContext(cmdCtx, "docker", "desktop", "stop")
 	stopCmd.Stdout = io.Discard
 	stopCmd.Stderr = io.Discard
 	_ = stopCmd.Run()
-
-	// Fallback: launch Docker Desktop with --quit (documented quit flag).
-	if exe, err := findDockerDesktopExe(); err == nil {
-		quitCmd := exec.CommandContext(cmdCtx, exe, "--quit")
-		if startErr := quitCmd.Start(); startErr == nil {
-			_ = quitCmd.Process.Release()
-		}
-	}
 
 	return r.waitUntilOffline(cmdCtx, "docker")
 }
