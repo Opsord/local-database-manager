@@ -263,7 +263,7 @@ func (m *AppModel) viewHelp() string {
 
 	helpItems := [][]string{
 		{"[↑ / ↓] / [k / j]", "Navigate through database instances"},
-		{"[Enter]", "Dock Action Menu in bottom-right panel (Start/Stop, Copy URI, Logs, Edit Instance, Purge)"},
+		{"[Enter]", "Dock Action Menu in bottom-right panel (Start/Stop, Copy URI, Logs, Edit Instance, Purge, Delete Instance)"},
 		{"[Edit Instance]", "Docked wizard (from Action Menu); [o] opens external editor"},
 		{"[y / n]", "Confirm restart after saving edits to a running instance"},
 		{"[/]", "Live Search / Filter instances in real-time"},
