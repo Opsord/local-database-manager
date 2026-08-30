@@ -106,6 +106,19 @@ func (m *AppModel) getActionMenuItems(inst *core.DatabaseInstance) []actionMenuI
 				return m, nil
 			},
 		},
+		{
+			label:       "Delete Instance",
+			description: "Purge container+volume and remove the instance .env from the list",
+			shortcut:    "D",
+			action: func(m *AppModel, inst *core.DatabaseInstance) (tea.Model, tea.Cmd) {
+				m.mode = ModeMain
+				m.clearConfirms()
+				m.confirmDelete = true
+				m.statusMsg = fmt.Sprintf("Delete instance '%s'? This purges container+volume and removes the .env. Press 'y' to confirm, 'n' to cancel", inst.Name)
+				m.statusIsErr = true
+				return m, nil
+			},
+		},
 	}
 }
 
@@ -260,7 +273,8 @@ func (m *AppModel) viewHelp() string {
 		{"[l]", "Open live log streamer for selected container"},
 		{"[n]", "Create new database instance with step-by-step wizard"},
 		{"[e]", "Dock Engines panel (left) — Start offline; Stop online (y/n confirm)"},
-		{"[d]", "Purge instance container and wipe persistent volume (down -v)"},
+		{"[d]", "Purge instance container and wipe persistent volume (down -v); keeps the .env definition"},
+		{"[D]", "Delete instance: purge container+volume and remove the .env from the list"},
 		{"[r]", "Reload instances & recheck Docker / Podman daemon health"},
 		{"[?]", "Toggle this help reference screen"},
 		{"[q / Ctrl+C]", "Quit application"},

@@ -1,9 +1,10 @@
-package app
+﻿package app
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -78,7 +79,7 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.selectedIndex > 0 {
 				m.selectedIndex--
 			}
-			if m.confirmPurge || m.confirmEngineStart || m.confirmEngineStop || m.confirmRestartAfterEdit {
+			if m.confirmPurge || m.confirmDelete || m.confirmEngineStart || m.confirmEngineStop || m.confirmRestartAfterEdit {
 				m.clearConfirms()
 				m.statusMsg = ""
 			}
@@ -89,7 +90,7 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.selectedIndex < len(list)-1 {
 				m.selectedIndex++
 			}
-			if m.confirmPurge || m.confirmEngineStart || m.confirmEngineStop || m.confirmRestartAfterEdit {
+			if m.confirmPurge || m.confirmDelete || m.confirmEngineStart || m.confirmEngineStop || m.confirmRestartAfterEdit {
 				m.clearConfirms()
 				m.statusMsg = ""
 			}
@@ -161,6 +162,19 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+		case "D":
+			inst := m.selectedInstance()
+			if inst == nil {
+				return m, nil
+			}
+			if !m.confirmDelete {
+				m.clearConfirms()
+				m.confirmDelete = true
+				m.statusMsg = fmt.Sprintf("Delete instance '%s'? This purges container+volume and removes the .env. Press 'y' to confirm, 'n' to cancel", inst.Name)
+				m.statusIsErr = true
+				return m, nil
+			}
+
 		case "y":
 			if m.confirmRestartAfterEdit {
 				old := m.pendingRestartOld
@@ -201,6 +215,15 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.purgeInstanceCmd(inst)
 				}
 			}
+			if m.confirmDelete {
+				inst := m.selectedInstance()
+				m.confirmDelete = false
+				if inst != nil {
+					m.statusMsg = fmt.Sprintf("Deleting '%s'...", inst.Name)
+					m.statusIsErr = false
+					return m, m.deleteInstanceCmd(inst)
+				}
+			}
 
 		case "n":
 			if m.confirmRestartAfterEdit {
@@ -225,6 +248,12 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.confirmPurge {
 				m.confirmPurge = false
+				m.statusMsg = "Action cancelled"
+				m.statusIsErr = false
+				return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
+			}
+			if m.confirmDelete {
+				m.confirmDelete = false
 				m.statusMsg = "Action cancelled"
 				m.statusIsErr = false
 				return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
@@ -323,6 +352,30 @@ func (m *AppModel) purgeInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
 	}
 }
 
+func (m *AppModel) deleteInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		runtime := inst.Runtime
+		if runtime == "" {
+			runtime = "docker"
+		}
+		health := m.runner.CheckEngineHealth(ctx, runtime)
+		if health == core.EngineNotInstalled {
+			return errMsg{fmt.Errorf("%w: %s — start is unavailable; cannot delete", core.ErrEngineNotInstalled, runtime)}
+		}
+		if health == core.EngineOffline {
+			return errMsg{fmt.Errorf("%w: %s is offline — start it from Engines (e) before deleting", core.ErrEngineOffline, runtime)}
+		}
+		if err := m.runner.DownVolumes(ctx, inst); err != nil {
+			return errMsg{err}
+		}
+		if err := os.Remove(inst.EnvFilePath); err != nil && !os.IsNotExist(err) {
+			return errMsg{err}
+		}
+		return deleteDoneMsg{name: inst.Name}
+	}
+}
+
 func (m *AppModel) buildRightDetailsContent(rightInner, rightWidth int) string {
 	inst := m.selectedInstance()
 	if inst == nil {
@@ -356,7 +409,7 @@ func mainShortcutEntries() []string {
 		return lipgloss.JoinHorizontal(lipgloss.Top, KeyStyle.Render(key), surfaceGap(1), KeyDescStyle.Render(desc))
 	}
 	return []string{
-		shortcut("[↑/↓]", "Nav"),
+		shortcut("[Ôåæ/Ôåô]", "Nav"),
 		shortcut("[Enter]", "Actions"),
 		shortcut("[/]", "Search"),
 		shortcut("[Space]", "Toggle"),
@@ -364,6 +417,7 @@ func mainShortcutEntries() []string {
 		shortcut("[c]", "URI"),
 		shortcut("[l]", "Logs"),
 		shortcut("[d]", "Purge"),
+		shortcut("[D]", "Delete"),
 		shortcut("[n]", "New"),
 		shortcut("[?]", "Help"),
 		shortcut("[q]", "Quit"),
@@ -375,7 +429,7 @@ func actionShortcutEntries() []string {
 		return lipgloss.JoinHorizontal(lipgloss.Top, KeyStyle.Render(key), surfaceGap(1), KeyDescStyle.Render(desc))
 	}
 	return []string{
-		shortcut("[↑↓]", "Nav"),
+		shortcut("[ÔåæÔåô]", "Nav"),
 		shortcut("[Enter]", "Run"),
 		shortcut("[Esc]", "Close"),
 	}
@@ -386,8 +440,8 @@ func wizardShortcutEntries() []string {
 		return lipgloss.JoinHorizontal(lipgloss.Top, KeyStyle.Render(key), surfaceGap(1), KeyDescStyle.Render(desc))
 	}
 	return []string{
-		shortcut("[↑↓]", "Rows"),
-		shortcut("[←→]", "Options"),
+		shortcut("[ÔåæÔåô]", "Rows"),
+		shortcut("[ÔåÉÔåÆ]", "Options"),
 		shortcut("[Enter]", "Next"),
 		shortcut("[b]", "Back"),
 		shortcut("[Esc]", "Cancel"),
@@ -399,7 +453,7 @@ func engineShortcutEntries() []string {
 		return lipgloss.JoinHorizontal(lipgloss.Top, KeyStyle.Render(key), surfaceGap(1), KeyDescStyle.Render(desc))
 	}
 	return []string{
-		shortcut("[↑↓]", "Nav"),
+		shortcut("[ÔåæÔåô]", "Nav"),
 		shortcut("[Enter]", "start/stop"),
 		shortcut("[y/n]", "confirm stop"),
 		shortcut("[Esc]", "Close"),

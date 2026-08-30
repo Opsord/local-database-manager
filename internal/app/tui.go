@@ -1,4 +1,4 @@
-package app
+﻿package app
 
 import (
 	"context"
@@ -32,6 +32,11 @@ type clearStatusMsg struct{}
 
 type actionDoneMsg struct {
 	msg string
+}
+
+type deleteDoneMsg struct {
+	name string
+	err  error
 }
 
 type restartAfterEditDoneMsg struct {
@@ -75,6 +80,7 @@ type AppModel struct {
 	statusMsg    string
 	statusIsErr  bool
 	confirmPurge bool
+	confirmDelete bool
 
 	confirmEngineStart   bool
 	pendingEngineRuntime string
@@ -109,6 +115,7 @@ func (m *AppModel) clearConfirms() {
 		m.finishEditRenameCleanup()
 	}
 	m.confirmPurge = false
+	m.confirmDelete = false
 	m.confirmEngineStart = false
 	m.pendingStartInst = nil
 	m.pendingEngineRuntime = ""
@@ -278,6 +285,21 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMsg = msg.msg
 		m.statusIsErr = false
 		return m, tea.Tick(4*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
+
+	case deleteDoneMsg:
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("Error: %v", msg.err)
+			m.statusIsErr = true
+			return m, tea.Batch(
+				tea.Tick(5*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }),
+			)
+		}
+		m.statusMsg = fmt.Sprintf("Instance '%s' deleted (container, volume, and .env removed)", msg.name)
+		m.statusIsErr = false
+		return m, tea.Batch(
+			m.reloadInstancesCmd(),
+			tea.Tick(4*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }),
+		)
 
 	case restartAfterEditDoneMsg:
 		if msg.err != nil {

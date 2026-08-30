@@ -16,6 +16,8 @@ type stubRunner struct {
 	docker                 core.EngineHealth
 	podman                 core.EngineHealth
 	startErr               error
+	downVolumesErr         error
+	downVolumesCalls       int
 	lastStartEngineRuntime string
 	lastStopInst           *core.DatabaseInstance
 	lastStartInst          *core.DatabaseInstance
@@ -45,7 +47,8 @@ func (s *stubRunner) Stop(_ context.Context, inst *core.DatabaseInstance) error 
 	return nil
 }
 func (s *stubRunner) DownVolumes(context.Context, *core.DatabaseInstance) error {
-	return nil
+	s.downVolumesCalls++
+	return s.downVolumesErr
 }
 func (s *stubRunner) CheckStatus(context.Context, *core.DatabaseInstance) core.ContainerStatus {
 	return core.StatusStopped
