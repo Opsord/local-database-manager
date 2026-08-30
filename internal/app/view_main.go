@@ -1,4 +1,4 @@
-﻿package app
+package app
 
 import (
 	"context"
@@ -409,7 +409,7 @@ func mainShortcutEntries() []string {
 		return lipgloss.JoinHorizontal(lipgloss.Top, KeyStyle.Render(key), surfaceGap(1), KeyDescStyle.Render(desc))
 	}
 	return []string{
-		shortcut("[Ôåæ/Ôåô]", "Nav"),
+		shortcut("[↑/↓]", "Nav"),
 		shortcut("[Enter]", "Actions"),
 		shortcut("[/]", "Search"),
 		shortcut("[Space]", "Toggle"),
@@ -429,7 +429,7 @@ func actionShortcutEntries() []string {
 		return lipgloss.JoinHorizontal(lipgloss.Top, KeyStyle.Render(key), surfaceGap(1), KeyDescStyle.Render(desc))
 	}
 	return []string{
-		shortcut("[ÔåæÔåô]", "Nav"),
+		shortcut("[↑↓]", "Nav"),
 		shortcut("[Enter]", "Run"),
 		shortcut("[Esc]", "Close"),
 	}
@@ -440,8 +440,8 @@ func wizardShortcutEntries() []string {
 		return lipgloss.JoinHorizontal(lipgloss.Top, KeyStyle.Render(key), surfaceGap(1), KeyDescStyle.Render(desc))
 	}
 	return []string{
-		shortcut("[ÔåæÔåô]", "Rows"),
-		shortcut("[ÔåÉÔåÆ]", "Options"),
+		shortcut("[↑↓]", "Rows"),
+		shortcut("[←→]", "Options"),
 		shortcut("[Enter]", "Next"),
 		shortcut("[b]", "Back"),
 		shortcut("[Esc]", "Cancel"),
@@ -453,7 +453,7 @@ func engineShortcutEntries() []string {
 		return lipgloss.JoinHorizontal(lipgloss.Top, KeyStyle.Render(key), surfaceGap(1), KeyDescStyle.Render(desc))
 	}
 	return []string{
-		shortcut("[ÔåæÔåô]", "Nav"),
+		shortcut("[↑↓]", "Nav"),
 		shortcut("[Enter]", "start/stop"),
 		shortcut("[y/n]", "confirm stop"),
 		shortcut("[Esc]", "Close"),
