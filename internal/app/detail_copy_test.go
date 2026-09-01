@@ -68,3 +68,17 @@ func TestClickTrackerDoubleClick(t *testing.T) {
 		t.Fatal("outside 500ms must not double")
 	}
 }
+
+func TestAppendValueTokenHits(t *testing.T) {
+	hits := appendValueTokenHits(nil, 100, 7, "POSTGRES (DOCKER)")
+	if len(hits) != 2 {
+		t.Fatalf("got %d hits: %+v", len(hits), hits)
+	}
+	if hits[0].Text != "POSTGRES" || hits[0].X != 100 || hits[0].Y != 7 || hits[0].W != 8 {
+		t.Fatalf("first hit %+v", hits[0])
+	}
+	// "POSTGRES"(8) + " "(1) + "("(1) => DOCKER at 110
+	if hits[1].Text != "DOCKER" || hits[1].X != 110 || hits[1].W != 6 {
+		t.Fatalf("second hit %+v", hits[1])
+	}
+}

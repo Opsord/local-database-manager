@@ -4,6 +4,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 type copyHit struct {
@@ -49,6 +51,27 @@ func tokenizeValue(s string) []valueToken {
 		out = append(out, valueToken{Start: start, End: i, Text: s[start:i]})
 	}
 	return out
+}
+
+func displayWidth(s string) int { return lipgloss.Width(s) }
+
+func appendValueTokenHits(dst []copyHit, originX, originY int, plainValue string) []copyHit {
+	for _, tok := range tokenizeValue(plainValue) {
+		dst = append(dst, copyHit{
+			X:    originX + displayWidth(plainValue[:tok.Start]),
+			Y:    originY,
+			W:    displayWidth(tok.Text),
+			H:    1,
+			Text: tok.Text,
+		})
+	}
+	return dst
+}
+
+const labelColumnWidth = 14 + 1
+
+func valueOriginX(fieldOriginX int) int {
+	return fieldOriginX + labelColumnWidth
 }
 
 func hitTest(hits []copyHit, x, y int) (string, bool) {
