@@ -1,12 +1,14 @@
 package app
 
 import (
+	"fmt"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"local-database-manager/internal/core"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -151,4 +153,65 @@ func buildDetailHits(inst *core.DatabaseInstance, panelWidth, rightInner, origin
 		}
 	}
 	return filtered
+}
+
+func (m *AppModel) detailsContentOrigin() (originX, originY, maxYExclusive int) {
+	inner := screenInnerWidth(m.width)
+	leftWidth, _, gapW := splitPanelWidths(inner)
+	contentHeight := mainContentHeight(m.height)
+
+	// wrapScreen Padding(0,1) + left outer + gap + right border + right padding
+	originX = 1 + leftWidth + 2 + gapW + 1 + 1
+
+	// header row + panel top border + title row
+	originY = 1 + 1 + 1
+
+	var detailsRegionHeight int
+	if m.mode == ModeWizard || m.mode == ModeActionMenu {
+		detailsRegionHeight, _ = splitPanelHalfHeight(contentHeight - 1)
+	} else {
+		detailsRegionHeight = contentHeight
+	}
+	panelInnerY := originY - 1
+	maxYExclusive = panelInnerY + detailsRegionHeight
+	return originX, originY, maxYExclusive
+}
+
+func (m *AppModel) refreshDetailHits() {
+	inst := m.selectedInstance()
+	if inst == nil {
+		m.detailHits = nil
+		return
+	}
+	inner := screenInnerWidth(m.width)
+	_, rightWidth, _ := splitPanelWidths(inner)
+	rightInner := panelInnerWidth(rightWidth)
+	ox, oy, maxY := m.detailsContentOrigin()
+	m.detailHits = buildDetailHits(inst, rightWidth, rightInner, ox, oy, maxY)
+}
+
+func (m *AppModel) handleDetailsMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
+	return m.handleDetailsMouseAt(msg, time.Now())
+}
+
+func (m *AppModel) handleDetailsMouseAt(msg tea.MouseMsg, now time.Time) (tea.Model, tea.Cmd, bool) {
+	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
+		return m, nil, false
+	}
+	m.refreshDetailHits()
+	if !m.detailClick.register(msg.X, msg.Y, now) {
+		return m, nil, false
+	}
+	text, ok := hitTest(m.detailHits, msg.X, msg.Y)
+	if !ok {
+		return m, nil, true
+	}
+	if err := core.CopyToClipboard(text); err != nil {
+		m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
+		m.statusIsErr = true
+	} else {
+		m.statusMsg = fmt.Sprintf("Copied: %s", text)
+		m.statusIsErr = false
+	}
+	return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }), true
 }

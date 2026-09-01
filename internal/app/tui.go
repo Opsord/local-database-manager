@@ -97,6 +97,9 @@ type AppModel struct {
 	width  int
 	height int
 
+	detailHits  []copyHit
+	detailClick clickTracker
+
 	// Sub-models
 	wizard wizardModel
 	logs   logsModel
@@ -392,6 +395,15 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.checkEngineHealthCmd(false),
 			tea.Tick(4*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }),
 		)
+
+	case tea.MouseMsg:
+		switch m.mode {
+		case ModeMain, ModeWizard, ModeActionMenu, ModeEngineMenu:
+			model, cmd, handled := m.handleDetailsMouse(msg)
+			if handled {
+				return model, cmd
+			}
+		}
 	}
 
 	// Route based on active mode

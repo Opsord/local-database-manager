@@ -1,10 +1,14 @@
 package app
 
 import (
+	"strings"
 	"testing"
 	"time"
 
+	"local-database-manager/internal/config"
 	"local-database-manager/internal/core"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestTokenizeValue(t *testing.T) {
@@ -123,4 +127,53 @@ func TestBuildDetailHitsRespectsMaxY(t *testing.T) {
 			t.Fatalf("hit beyond maxY: %+v", h)
 		}
 	}
+}
+
+func TestDetailsContentOriginInRightPanel(t *testing.T) {
+	m := NewApp(t.TempDir(), config.Config{})
+	m.width, m.height = 120, 40
+	ox, oy, maxY := m.detailsContentOrigin()
+	inner := screenInnerWidth(m.width)
+	left, _, gap := splitPanelWidths(inner)
+	minX := 1 + left + 2 + gap // wrap + left outer + gap
+	if ox < minX {
+		t.Fatalf("originX=%d want >= %d", ox, minX)
+	}
+	if oy < 2 {
+		t.Fatalf("originY=%d", oy)
+	}
+	if maxY <= oy {
+		t.Fatalf("maxY=%d oy=%d", maxY, oy)
+	}
+}
+
+func TestHandleDetailsMouseDoubleClickSetsStatus(t *testing.T) {
+	m := NewApp(t.TempDir(), config.Config{})
+	m.width, m.height = 120, 40
+	m.instances = []*core.DatabaseInstance{{
+		Name: "shop", EngineType: "postgres", Runtime: "docker",
+		User: "postgres", Port: 5432, Status: core.StatusReady,
+		MemoryUsage: "-", MemoryLimit: "-", Database: "shop", Schema: "public",
+	}}
+	m.selectedIndex = 0
+	m.refreshDetailHits()
+	if len(m.detailHits) == 0 {
+		t.Fatal("expected hits")
+	}
+	h := m.detailHits[0]
+	t0 := time.Now()
+	m.detailClick = clickTracker{x: h.X, y: h.Y, at: t0, armed: true}
+	msg := tea.MouseMsg{
+		X: h.X, Y: h.Y,
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+	}
+	_, cmd, handled := m.handleDetailsMouseAt(msg, t0.Add(100*time.Millisecond))
+	if !handled {
+		t.Fatal("expected handled double-click")
+	}
+	if !strings.HasPrefix(m.statusMsg, "Copied: ") && !strings.HasPrefix(m.statusMsg, "Failed to copy:") {
+		t.Fatalf("status=%q", m.statusMsg)
+	}
+	_ = cmd
 }
