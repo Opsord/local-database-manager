@@ -5,6 +5,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"local-database-manager/internal/core"
+
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -106,4 +108,47 @@ func absInt(n int) int {
 		return -n
 	}
 	return n
+}
+
+func buildDetailHits(inst *core.DatabaseInstance, panelWidth, rightInner, originX, originY, maxYExclusive int) []copyHit {
+	fields := plainDetailFields(inst, panelWidth)
+	codeBoxWidth := rightInner - 16
+	if codeBoxWidth < 20 {
+		codeBoxWidth = 20
+	}
+
+	var hits []copyHit
+	rowY := originY
+
+	if panelWidth < 70 {
+		for _, f := range fields {
+			hits = appendValueTokenHits(hits, valueOriginX(originX), rowY, f.Value)
+			rowY++
+		}
+	} else {
+		colGap := 3
+		availW := panelWidth - 4
+		col1W := (availW - colGap) / 2
+		for i := 0; i < len(fields); i += 2 {
+			hits = appendValueTokenHits(hits, valueOriginX(originX), rowY, fields[i].Value)
+			if i+1 < len(fields) {
+				col2X := originX + col1W + colGap
+				hits = appendValueTokenHits(hits, valueOriginX(col2X), rowY, fields[i+1].Value)
+			}
+			rowY++
+		}
+	}
+
+	rowY++ // blank row before URI/CLI
+	hits = appendValueTokenHits(hits, valueOriginX(originX), rowY, truncateMiddle(inst.ConnectionURI(), codeBoxWidth))
+	rowY++
+	hits = appendValueTokenHits(hits, valueOriginX(originX), rowY, truncateMiddle(inst.CLICommand(), codeBoxWidth))
+
+	var filtered []copyHit
+	for _, h := range hits {
+		if h.Y >= originY && h.Y < maxYExclusive {
+			filtered = append(filtered, h)
+		}
+	}
+	return filtered
 }

@@ -3,6 +3,8 @@ package app
 import (
 	"testing"
 	"time"
+
+	"local-database-manager/internal/core"
 )
 
 func TestTokenizeValue(t *testing.T) {
@@ -80,5 +82,45 @@ func TestAppendValueTokenHits(t *testing.T) {
 	// "POSTGRES"(8) + " "(1) + "("(1) => DOCKER at 110
 	if hits[1].Text != "DOCKER" || hits[1].X != 110 || hits[1].W != 6 {
 		t.Fatalf("second hit %+v", hits[1])
+	}
+}
+
+func TestBuildDetailHitsIncludesUserToken(t *testing.T) {
+	inst := &core.DatabaseInstance{
+		Name: "shop", EngineType: "postgres", Runtime: "docker",
+		Version: "16", ContainerName: "pg_shop", Status: core.StatusReady,
+		MemoryUsage: "100MiB", MemoryLimit: "512MiB", Database: "shop",
+		Port: 5432, User: "postgres", Schema: "public",
+		Volume: "pgdata_shop_16", ProjectName: "pg_shop",
+	}
+	hits := buildDetailHits(inst, 120, 56, 0, 0, 100)
+	found := false
+	for _, h := range hits {
+		if h.Text == "postgres" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected postgres token in hits: %+v", hits)
+	}
+	for _, h := range hits {
+		switch h.Text {
+		case "User:", "[c]", "copy":
+			t.Fatalf("label/hint must not be a hit: %+v", h)
+		}
+	}
+}
+
+func TestBuildDetailHitsRespectsMaxY(t *testing.T) {
+	inst := &core.DatabaseInstance{
+		EngineType: "postgres", Runtime: "docker", User: "postgres", Port: 1,
+		Status: core.StatusStopped, MemoryUsage: "-", MemoryLimit: "-",
+	}
+	hits := buildDetailHits(inst, 40, 36, 0, 0, 1)
+	for _, h := range hits {
+		if h.Y >= 1 {
+			t.Fatalf("hit beyond maxY: %+v", h)
+		}
 	}
 }

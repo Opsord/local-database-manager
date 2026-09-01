@@ -176,37 +176,68 @@ func detailField(label, value string) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, LabelStyle.Render(label), surfaceGap(1), value)
 }
 
-func renderDetailRows(inst *core.DatabaseInstance, panelWidth int) []string {
+type plainDetailField struct {
+	Label, Value string
+}
+
+func statusPlainText(status core.ContainerStatus) string {
+	switch status {
+	case core.StatusReady:
+		return "RUNNING"
+	case core.StatusStarting:
+		return "STARTING"
+	case core.StatusUnknown:
+		return "UNKNOWN"
+	default:
+		return "STOPPED"
+	}
+}
+
+func plainDetailFields(inst *core.DatabaseInstance, panelWidth int) []plainDetailField {
 	engineDesc := fmt.Sprintf("%s (%s)", strings.ToUpper(inst.EngineType), strings.ToUpper(inst.Runtime))
 	memFormatted := fmt.Sprintf("%s (Limit: %s)", inst.MemoryUsage, inst.MemoryLimit)
-	statusFormatted := statusLabel(inst.Status)
 
-	fields := []struct {
-		label string
-		value string
-	}{
-		{"Engine:", ValueHighlightStyle.Render(engineDesc)},
+	fields := []plainDetailField{
+		{"Engine:", engineDesc},
 	}
 	if inst.EngineType == "postgres" {
-		fields = append(fields, struct {
-			label string
-			value string
-		}{"Version:", ValueStyle.Render(inst.Version)})
+		fields = append(fields, plainDetailField{"Version:", inst.Version})
 	}
-	fields = append(fields, []struct {
+	fields = append(fields, []plainDetailField{
+		{"Container:", truncateEnd(inst.ContainerName, panelWidth-20)},
+		{"Status:", statusPlainText(inst.Status)},
+		{"Memory:", memFormatted},
+		{"Database:", inst.Database},
+		{"Port:", fmt.Sprintf("%d", inst.Port)},
+		{"User:", inst.User},
+		{"Schema:", inst.Schema},
+		{"Volume:", truncateEnd(inst.Volume, panelWidth-20)},
+		{"Project:", truncateEnd(inst.ProjectName, panelWidth-20)},
+	}...)
+	return fields
+}
+
+func styledDetailValue(label string, plainValue string, inst *core.DatabaseInstance) string {
+	switch label {
+	case "Engine:", "Port:":
+		return ValueHighlightStyle.Render(plainValue)
+	case "Status:":
+		return statusLabel(inst.Status)
+	default:
+		return ValueStyle.Render(plainValue)
+	}
+}
+
+func renderDetailRows(inst *core.DatabaseInstance, panelWidth int) []string {
+	plain := plainDetailFields(inst, panelWidth)
+	fields := make([]struct {
 		label string
 		value string
-	}{
-		{"Container:", ValueStyle.Render(truncateEnd(inst.ContainerName, panelWidth-20))},
-		{"Status:", statusFormatted},
-		{"Memory:", ValueStyle.Render(memFormatted)},
-		{"Database:", ValueStyle.Render(inst.Database)},
-		{"Port:", ValueHighlightStyle.Render(fmt.Sprintf("%d", inst.Port))},
-		{"User:", ValueStyle.Render(inst.User)},
-		{"Schema:", ValueStyle.Render(inst.Schema)},
-		{"Volume:", ValueStyle.Render(truncateEnd(inst.Volume, panelWidth-20))},
-		{"Project:", ValueStyle.Render(truncateEnd(inst.ProjectName, panelWidth-20))},
-	}...)
+	}, len(plain))
+	for i, f := range plain {
+		fields[i].label = f.Label
+		fields[i].value = styledDetailValue(f.Label, f.Value, inst)
+	}
 
 	if panelWidth < 70 {
 		rows := make([]string, 0, len(fields))
