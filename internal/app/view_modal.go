@@ -269,6 +269,7 @@ func (m *AppModel) viewHelp() string {
 		{"[/]", "Live Search / Filter instances in real-time"},
 		{"[Space]", "Start or Stop container instance"},
 		{"[c]", "Copy connection URI to clipboard"},
+		{"Double-click", "Double-click a value token in Details to copy it"},
 		{"[E / x]", "Copy backend .env configuration block to clipboard"},
 		{"[l]", "Open live log streamer for selected container"},
 		{"[n]", "Create new database instance with step-by-step wizard"},
