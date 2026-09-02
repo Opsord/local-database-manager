@@ -23,6 +23,7 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.isFiltering = false
 				m.filterInput = ""
 				m.selectedIndex = 0
+				m.clearCopiedHit()
 				return m, nil
 			case "enter":
 				m.isFiltering = false
@@ -31,23 +32,27 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(m.filterInput) > 0 {
 					m.filterInput = m.filterInput[:len(m.filterInput)-1]
 					m.selectedIndex = 0
+					m.clearCopiedHit()
 				}
 				return m, nil
 			case "up", "k":
 				if m.selectedIndex > 0 {
 					m.selectedIndex--
+					m.clearCopiedHit()
 				}
 				return m, nil
 			case "down", "j":
 				list := m.filteredInstances()
 				if m.selectedIndex < len(list)-1 {
 					m.selectedIndex++
+					m.clearCopiedHit()
 				}
 				return m, nil
 			default:
 				if len(msg.String()) == 1 && msg.Runes != nil && len(msg.Runes) > 0 {
 					m.filterInput += msg.String()
 					m.selectedIndex = 0
+					m.clearCopiedHit()
 					return m, nil
 				}
 			}
@@ -65,6 +70,7 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.isFiltering = true
 			m.filterInput = ""
 			m.selectedIndex = 0
+			m.clearCopiedHit()
 			return m, nil
 
 		case "enter":
@@ -78,6 +84,7 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			if m.selectedIndex > 0 {
 				m.selectedIndex--
+				m.clearCopiedHit()
 			}
 			if m.confirmPurge || m.confirmDelete || m.confirmEngineStart || m.confirmEngineStop || m.confirmRestartAfterEdit {
 				m.clearConfirms()
@@ -89,6 +96,7 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			list := m.filteredInstances()
 			if m.selectedIndex < len(list)-1 {
 				m.selectedIndex++
+				m.clearCopiedHit()
 			}
 			if m.confirmPurge || m.confirmDelete || m.confirmEngineStart || m.confirmEngineStop || m.confirmRestartAfterEdit {
 				m.clearConfirms()

@@ -78,13 +78,25 @@ func valueOriginX(fieldOriginX int) int {
 	return fieldOriginX + labelColumnWidth
 }
 
-func hitTest(hits []copyHit, x, y int) (string, bool) {
+func findCopyHit(hits []copyHit, x, y int) (copyHit, bool) {
 	for _, h := range hits {
 		if y >= h.Y && y < h.Y+h.H && x >= h.X && x < h.X+h.W {
-			return h.Text, true
+			return h, true
 		}
 	}
-	return "", false
+	return copyHit{}, false
+}
+
+func (m *AppModel) clearCopiedHit() {
+	m.copiedHit = nil
+}
+
+func hitTest(hits []copyHit, x, y int) (string, bool) {
+	h, ok := findCopyHit(hits, x, y)
+	if !ok {
+		return "", false
+	}
+	return h.Text, true
 }
 
 type clickTracker struct {
@@ -207,9 +219,14 @@ func (m *AppModel) handleDetailsMouseAt(msg tea.MouseMsg, now time.Time) (tea.Mo
 		return m, nil, true
 	}
 	if err := core.CopyToClipboard(text); err != nil {
+		m.clearCopiedHit()
 		m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
 		m.statusIsErr = true
 	} else {
+		if h, ok := findCopyHit(m.detailHits, msg.X, msg.Y); ok {
+			cp := h
+			m.copiedHit = &cp
+		}
 		m.statusMsg = fmt.Sprintf("Copied: %s", text)
 		m.statusIsErr = false
 	}

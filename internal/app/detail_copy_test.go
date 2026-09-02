@@ -183,6 +183,67 @@ func TestDetailsContentOriginInRightPanel(t *testing.T) {
 	}
 }
 
+func TestSuccessfulCopySetsCopiedHit(t *testing.T) {
+	m := NewApp(t.TempDir(), config.Config{})
+	m.width, m.height = 120, 40
+	m.instances = []*core.DatabaseInstance{{
+		Name: "shop", EngineType: "postgres", Runtime: "docker",
+		User: "postgres", Port: 5432, Status: core.StatusReady,
+		MemoryUsage: "-", MemoryLimit: "-", Database: "shop", Schema: "public",
+	}}
+	m.selectedIndex = 0
+	m.refreshDetailHits()
+	if len(m.detailHits) == 0 {
+		t.Fatal("expected hits")
+	}
+	h := m.detailHits[0]
+	t0 := time.Now()
+	m.detailClick = clickTracker{x: h.X, y: h.Y, at: t0, armed: true}
+	msg := tea.MouseMsg{X: h.X, Y: h.Y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}
+	_, _, handled := m.handleDetailsMouseAt(msg, t0.Add(100*time.Millisecond))
+	if !handled {
+		t.Fatal("expected handled")
+	}
+	if m.copiedHit == nil || m.copiedHit.Text == "" {
+		t.Fatalf("expected copiedHit set, got %#v", m.copiedHit)
+	}
+	if m.copiedHit.Text != h.Text {
+		t.Fatalf("copiedHit.Text=%q want %q", m.copiedHit.Text, h.Text)
+	}
+}
+
+func TestClearStatusMsgClearsCopiedHit(t *testing.T) {
+	m := NewApp(t.TempDir(), config.Config{})
+	hit := copyHit{X: 1, Y: 2, W: 3, H: 1, Text: "postgres"}
+	m.copiedHit = &hit
+	m.statusMsg = "Copied: postgres"
+	updated, _ := m.Update(clearStatusMsg{})
+	am := updated.(*AppModel)
+	if am.copiedHit != nil {
+		t.Fatalf("expected copiedHit cleared, got %#v", am.copiedHit)
+	}
+	if am.statusMsg != "" {
+		t.Fatalf("status=%q", am.statusMsg)
+	}
+}
+
+func TestSelectionChangeClearsCopiedHit(t *testing.T) {
+	m := NewApp(t.TempDir(), config.Config{})
+	m.width, m.height = 120, 40
+	m.instances = []*core.DatabaseInstance{
+		{Name: "a", EngineType: "postgres", Runtime: "docker", User: "u1", Port: 1, Status: core.StatusReady, MemoryUsage: "-", MemoryLimit: "-", Database: "d", Schema: "public"},
+		{Name: "b", EngineType: "postgres", Runtime: "docker", User: "u2", Port: 2, Status: core.StatusReady, MemoryUsage: "-", MemoryLimit: "-", Database: "d", Schema: "public"},
+	}
+	m.selectedIndex = 0
+	hit := copyHit{Text: "u1"}
+	m.copiedHit = &hit
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	am := updated.(*AppModel)
+	if am.copiedHit != nil {
+		t.Fatalf("expected clear on selection change, got %#v", am.copiedHit)
+	}
+}
+
 func TestHandleDetailsMouseDoubleClickSetsStatus(t *testing.T) {
 	m := NewApp(t.TempDir(), config.Config{})
 	m.width, m.height = 120, 40

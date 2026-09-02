@@ -99,6 +99,7 @@ type AppModel struct {
 
 	detailHits  []copyHit
 	detailClick clickTracker
+	copiedHit   *copyHit
 
 	// Sub-models
 	wizard wizardModel
@@ -323,6 +324,7 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case clearStatusMsg:
 		m.statusMsg = ""
+		m.clearCopiedHit()
 		return m, nil
 
 	case errMsg:
