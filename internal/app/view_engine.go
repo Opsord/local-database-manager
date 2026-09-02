@@ -54,7 +54,17 @@ func engineRow(runtime string, h core.EngineHealth) engineMenuRow {
 
 func (m *AppModel) startEngineCmd(runtime string, retryInst *core.DatabaseInstance) tea.Cmd {
 	return func() tea.Msg {
+		// #region agent log
+		core.AgentDebugLog("E", "view_engine.go:startEngineCmd", "invoked", map[string]any{"runtime": runtime})
+		// #endregion
 		err := m.runner.StartEngine(context.Background(), runtime)
+		// #region agent log
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		core.AgentDebugLog("E", "view_engine.go:startEngineCmd", "finished", map[string]any{"runtime": runtime, "err": errStr})
+		// #endregion
 		return engineStartedMsg{runtime: runtime, err: err, retryInst: retryInst}
 	}
 }

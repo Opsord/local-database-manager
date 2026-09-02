@@ -132,6 +132,55 @@ func TestIsPodmanMachineAlreadyRunning(t *testing.T) {
 	}
 }
 
+func TestPickPodmanConnectionToDefault(t *testing.T) {
+	t.Parallel()
+	conns := []podmanSystemConnection{
+		{Name: "podman-machine-default-root", Default: true},
+		{Name: "podman-machine-default", Default: false},
+	}
+	if got := pickPodmanConnectionToDefault(conns, map[string]bool{
+		"podman-machine-default-root": false,
+		"podman-machine-default":      true,
+	}); got != "podman-machine-default" {
+		t.Fatalf("got %q, want podman-machine-default", got)
+	}
+	if got := pickPodmanConnectionToDefault(conns, map[string]bool{
+		"podman-machine-default-root": true,
+		"podman-machine-default":      true,
+	}); got != "" {
+		t.Fatalf("got %q, want empty when default already works", got)
+	}
+	if got := pickPodmanConnectionToDefault(conns, map[string]bool{}); got != "" {
+		t.Fatalf("got %q, want empty when nothing works", got)
+	}
+}
+
+func TestWindowsNamedPipeToDOCKERHost(t *testing.T) {
+	t.Parallel()
+	got := windowsNamedPipeToDOCKERHost(`\\.\pipe\podman-machine-default`)
+	want := "npipe:////./pipe/podman-machine-default"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	if windowsNamedPipeToDOCKERHost("") != "" {
+		t.Fatal("empty path should yield empty host")
+	}
+	if windowsNamedPipeToDOCKERHost(`C:\not\a\pipe`) != "" {
+		t.Fatal("non-pipe path should yield empty host")
+	}
+}
+
+func TestIsPodmanComposePipeError(t *testing.T) {
+	t.Parallel()
+	stderr := `unable to get image 'postgres:18': error during connect: Get "http://%2F%2F.%2Fpipe%2Fpodman-machine-default/v1.55/images/postgres:18/json": EOF`
+	if !isPodmanComposePipeError(stderr) {
+		t.Fatal("expected pipe EOF detection")
+	}
+	if isPodmanComposePipeError("image not found") {
+		t.Fatal("should not match unrelated errors")
+	}
+}
+
 func TestRunner_StartEngine_AlreadyOnlineIsNoop(t *testing.T) {
 	t.Parallel()
 	// Skip if neither docker nor podman is online on this machine.

@@ -29,4 +29,25 @@ func TestDeriveVolumeName(t *testing.T) {
 	if got := DeriveVolumeName("sqlserver", "shop", "16"); got != "sqlserver_shop" {
 		t.Fatalf("sqlserver must ignore version, got %q", got)
 	}
+	if got := DeriveVolumeName("postgres", "My Shop App", "16"); got != "pgdata_my_shop_app_16" {
+		t.Fatalf("spaces/case should snake_case, got %q", got)
+	}
+}
+
+func TestSanitizeIdent(t *testing.T) {
+	t.Parallel()
+	cases := []struct{ in, want string }{
+		{"", ""},
+		{"  Shop  ", "shop"},
+		{"My Shop", "my_shop"},
+		{"my   shop  app", "my_shop_app"},
+		{"already_ok", "already_ok"},
+		{"My-Shop", "my_shop"},
+		{"PG-My__Shop", "pg_my_shop"},
+	}
+	for _, tc := range cases {
+		if got := SanitizeIdent(tc.in); got != tc.want {
+			t.Fatalf("SanitizeIdent(%q)=%q, want %q", tc.in, got, tc.want)
+		}
+	}
 }

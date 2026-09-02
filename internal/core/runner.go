@@ -3,11 +3,14 @@ package core
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -56,7 +59,13 @@ func (r *Runner) CheckEngineHealth(ctx context.Context, runtimeName string) Engi
 		bin = "docker"
 	}
 
-	if _, err := exec.LookPath(bin); err != nil {
+	path, lookErr := exec.LookPath(bin)
+	if lookErr != nil {
+		// #region agent log
+		if bin == "podman" {
+			AgentDebugLog("A", "runner.go:CheckEngineHealth", "lookpath_miss", map[string]any{"bin": bin, "err": lookErr.Error()})
+		}
+		// #endregion
 		return EngineNotInstalled
 	}
 
@@ -67,8 +76,20 @@ func (r *Runner) CheckEngineHealth(ctx context.Context, runtimeName string) Engi
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	if err := cmd.Run(); err != nil {
+		// #region agent log
+		if bin == "podman" {
+			AgentDebugLog("A", "runner.go:CheckEngineHealth", "info_failed", map[string]any{
+				"bin": bin, "path": path, "err": err.Error(), "ctxErr": fmt.Sprint(cmdCtx.Err()),
+			})
+		}
+		// #endregion
 		return EngineOffline
 	}
+	// #region agent log
+	if bin == "podman" {
+		AgentDebugLog("A", "runner.go:CheckEngineHealth", "info_ok", map[string]any{"bin": bin, "path": path})
+	}
+	// #endregion
 	return EngineOnline
 }
 
@@ -79,6 +100,9 @@ func (r *Runner) StartEngine(ctx context.Context, runtimeName string) error {
 		bin = "docker"
 	}
 	health := r.CheckEngineHealth(ctx, bin)
+	// #region agent log
+	AgentDebugLog("E", "runner.go:StartEngine", "entry", map[string]any{"bin": bin, "health": string(health)})
+	// #endregion
 	switch health {
 	case EngineOnline:
 		return nil
@@ -87,7 +111,15 @@ func (r *Runner) StartEngine(ctx context.Context, runtimeName string) error {
 	}
 	switch bin {
 	case "podman":
-		return r.startPodmanMachine(ctx)
+		err := r.startPodmanMachine(ctx)
+		// #region agent log
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		AgentDebugLog("E", "runner.go:StartEngine", "podman_done", map[string]any{"err": errStr})
+		// #endregion
+		return err
 	case "docker":
 		return r.startDockerEngine(ctx)
 	default:
@@ -170,11 +202,134 @@ func (r *Runner) execPodmanMachine(ctx context.Context, subcmd string) (stderr s
 	return strings.TrimSpace(errBuf.String()), err
 }
 
+type podmanSystemConnection struct {
+	Name    string `json:"Name"`
+	URI     string `json:"URI"`
+	Default bool   `json:"Default"`
+}
+
+// pickPodmanConnectionToDefault returns the first working non-default connection
+// name that should become the new default. Empty string means no change needed
+// (already healthy via default, or nothing worked).
+func pickPodmanConnectionToDefault(conns []podmanSystemConnection, working map[string]bool) string {
+	for _, c := range conns {
+		if !working[c.Name] {
+			continue
+		}
+		if c.Default {
+			return ""
+		}
+		return c.Name
+	}
+	return ""
+}
+
+func (r *Runner) listPodmanConnections(ctx context.Context) ([]podmanSystemConnection, error) {
+	cmd := exec.CommandContext(ctx, "podman", "system", "connection", "list", "--format", "json")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("podman system connection list: %v (%s)", err, strings.TrimSpace(stderr.String()))
+	}
+	var conns []podmanSystemConnection
+	if err := json.Unmarshal(stdout.Bytes(), &conns); err != nil {
+		return nil, fmt.Errorf("parse podman connections: %w", err)
+	}
+	return conns, nil
+}
+
+func (r *Runner) podmanInfoOK(ctx context.Context, connection string) bool {
+	args := []string{"info"}
+	if connection != "" {
+		args = []string{"--connection", connection, "info"}
+	}
+	cmd := exec.CommandContext(ctx, "podman", args...)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	return cmd.Run() == nil
+}
+
+func (r *Runner) setPodmanDefaultConnection(ctx context.Context, name string) error {
+	cmd := exec.CommandContext(ctx, "podman", "system", "connection", "default", name)
+	var stderr bytes.Buffer
+	cmd.Stdout = io.Discard
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("podman system connection default %s: %v (%s)", name, err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+// repairPodmanDefaultConnection switches the default connection to one that can
+// answer `podman info`. On Podman 6 + WSL the *-root default often points at
+// /run/podman/podman.sock which may not exist while the user socket does.
+func (r *Runner) repairPodmanDefaultConnection(ctx context.Context) bool {
+	if r.CheckEngineHealth(ctx, "podman") == EngineOnline {
+		return true
+	}
+	conns, err := r.listPodmanConnections(ctx)
+	if err != nil || len(conns) == 0 {
+		// #region agent log
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		AgentDebugLog("G", "runner.go:repairPodmanDefaultConnection", "list_failed", map[string]any{"err": errStr})
+		// #endregion
+		return false
+	}
+	working := make(map[string]bool, len(conns))
+	for _, c := range conns {
+		working[c.Name] = r.podmanInfoOK(ctx, c.Name)
+	}
+	name := pickPodmanConnectionToDefault(conns, working)
+	// #region agent log
+	AgentDebugLog("G", "runner.go:repairPodmanDefaultConnection", "probe", map[string]any{
+		"working": working, "pick": name, "runId": "post-fix",
+	})
+	// #endregion
+	if name == "" {
+		// Either default already works (checked above) or nothing answered.
+		for _, c := range conns {
+			if c.Default && working[c.Name] {
+				return true
+			}
+		}
+		return false
+	}
+	if err := r.setPodmanDefaultConnection(ctx, name); err != nil {
+		// #region agent log
+		AgentDebugLog("G", "runner.go:repairPodmanDefaultConnection", "set_default_failed", map[string]any{"err": err.Error(), "name": name})
+		// #endregion
+		return false
+	}
+	ok := r.CheckEngineHealth(ctx, "podman") == EngineOnline
+	// #region agent log
+	AgentDebugLog("G", "runner.go:repairPodmanDefaultConnection", "repaired", map[string]any{"name": name, "online": ok, "runId": "post-fix"})
+	// #endregion
+	return ok
+}
+
 func (r *Runner) startPodmanMachine(ctx context.Context) error {
 	cmdCtx, cancel := context.WithTimeout(ctx, engineStartTimeout)
 	defer cancel()
 
+	// Machine may already be running with a broken default connection URI.
+	if r.repairPodmanDefaultConnection(cmdCtx) {
+		return nil
+	}
+
 	stderr, err := r.execPodmanMachine(cmdCtx, "start")
+	// #region agent log
+	errStr := ""
+	if err != nil {
+		errStr = err.Error()
+	}
+	AgentDebugLog("B", "runner.go:startPodmanMachine", "first_start", map[string]any{
+		"err": errStr, "stderr": stderr, "alreadyRunning": isPodmanMachineAlreadyRunning(stderr), "runId": "post-fix",
+	})
+	// #endregion
 	if err != nil {
 		if r.CheckEngineHealth(cmdCtx, "podman") == EngineOnline {
 			return nil
@@ -182,12 +337,31 @@ func (r *Runner) startPodmanMachine(ctx context.Context) error {
 		// Windows/WSL: machine reports "running" but podman info cannot connect
 		// (stale SSH/socket). podman machine start then returns "already running".
 		if isPodmanMachineAlreadyRunning(stderr) {
-			if _, stopErr := r.execPodmanMachine(cmdCtx, "stop"); stopErr != nil {
+			stopStderr, stopErr := r.execPodmanMachine(cmdCtx, "stop")
+			// #region agent log
+			stopErrStr := ""
+			if stopErr != nil {
+				stopErrStr = stopErr.Error()
+			}
+			AgentDebugLog("D", "runner.go:startPodmanMachine", "recovery_stop", map[string]any{
+				"err": stopErrStr, "stderr": stopStderr,
+			})
+			// #endregion
+			if stopErr != nil {
 				if r.CheckEngineHealth(cmdCtx, "podman") == EngineOnline {
 					return nil
 				}
 			}
 			stderr, err = r.execPodmanMachine(cmdCtx, "start")
+			// #region agent log
+			errStr = ""
+			if err != nil {
+				errStr = err.Error()
+			}
+			AgentDebugLog("B", "runner.go:startPodmanMachine", "recovery_start", map[string]any{
+				"err": errStr, "stderr": stderr,
+			})
+			// #endregion
 			if err != nil {
 				if r.CheckEngineHealth(cmdCtx, "podman") == EngineOnline {
 					return nil
@@ -198,7 +372,154 @@ func (r *Runner) startPodmanMachine(ctx context.Context) error {
 			return fmt.Errorf("%w: podman machine start: %v (%s)", ErrEngineStartFailed, err, stderr)
 		}
 	}
-	return r.waitUntilOnline(cmdCtx, "podman")
+
+	if !r.repairPodmanDefaultConnection(cmdCtx) {
+		waitErr := r.waitUntilOnline(cmdCtx, "podman")
+		// #region agent log
+		waitErrStr := ""
+		if waitErr != nil {
+			waitErrStr = waitErr.Error()
+		}
+		AgentDebugLog("C", "runner.go:startPodmanMachine", "wait_online", map[string]any{"err": waitErrStr, "runId": "post-fix"})
+		// #endregion
+		if waitErr != nil && !r.repairPodmanDefaultConnection(cmdCtx) {
+			return waitErr
+		}
+	}
+	return nil
+}
+
+// windowsNamedPipeToDOCKERHost converts a Windows pipe path to a DOCKER_HOST value.
+// Example: \\.\pipe\podman-machine-default → npipe:////./pipe/podman-machine-default
+func windowsNamedPipeToDOCKERHost(pipePath string) string {
+	p := strings.TrimSpace(pipePath)
+	if p == "" {
+		return ""
+	}
+	p = strings.ReplaceAll(p, "/", `\`)
+	lower := strings.ToLower(p)
+	const prefix = `\\.\pipe\`
+	if !strings.HasPrefix(lower, prefix) {
+		return ""
+	}
+	name := p[len(prefix):]
+	if name == "" {
+		return ""
+	}
+	return "npipe:////./pipe/" + name
+}
+
+type podmanMachineInspect struct {
+	ConnectionInfo struct {
+		PodmanPipe *struct {
+			Path string `json:"Path"`
+		} `json:"PodmanPipe"`
+	} `json:"ConnectionInfo"`
+}
+
+func (r *Runner) podmanMachineDOCKERHost(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, "podman", "machine", "inspect")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("podman machine inspect: %v (%s)", err, strings.TrimSpace(stderr.String()))
+	}
+	var machines []podmanMachineInspect
+	if err := json.Unmarshal(stdout.Bytes(), &machines); err != nil {
+		return "", fmt.Errorf("parse podman machine inspect: %w", err)
+	}
+	if len(machines) == 0 || machines[0].ConnectionInfo.PodmanPipe == nil {
+		return "", fmt.Errorf("podman machine inspect: missing PodmanPipe")
+	}
+	host := windowsNamedPipeToDOCKERHost(machines[0].ConnectionInfo.PodmanPipe.Path)
+	if host == "" {
+		return "", fmt.Errorf("podman machine inspect: invalid PodmanPipe path %q", machines[0].ConnectionInfo.PodmanPipe.Path)
+	}
+	return host, nil
+}
+
+func (r *Runner) probeDOCKERHost(ctx context.Context, dockerHost string) bool {
+	bin, err := exec.LookPath("docker")
+	if err != nil {
+		return false
+	}
+	cmd := exec.CommandContext(ctx, bin, "version", "--format", "{{.Server.APIVersion}}")
+	cmd.Env = append(os.Environ(), "DOCKER_HOST="+dockerHost)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	return cmd.Run() == nil
+}
+
+func (r *Runner) podmanComposeAPIReady(ctx context.Context) bool {
+	if runtime.GOOS != "windows" {
+		return true
+	}
+	host, err := r.podmanMachineDOCKERHost(ctx)
+	if err != nil {
+		// #region agent log
+		AgentDebugLog("H", "runner.go:podmanComposeAPIReady", "inspect_failed", map[string]any{"err": err.Error(), "runId": "post-fix"})
+		// #endregion
+		return false
+	}
+	ok := r.probeDOCKERHost(ctx, host)
+	// #region agent log
+	AgentDebugLog("H", "runner.go:podmanComposeAPIReady", "probe", map[string]any{"host": host, "ok": ok, "runId": "post-fix"})
+	// #endregion
+	return ok
+}
+
+// ensurePodmanComposeReady makes sure Windows Docker-API named-pipe forwarding
+// works. `podman compose` shells out to docker-compose, which needs that pipe
+// even when `podman info` over SSH already succeeds.
+func (r *Runner) ensurePodmanComposeReady(ctx context.Context) error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	if _, err := exec.LookPath("docker"); err != nil {
+		// Cannot probe; leave compose to fail with a clearer provider error.
+		return nil
+	}
+	if r.podmanComposeAPIReady(ctx) {
+		return nil
+	}
+	// #region agent log
+	AgentDebugLog("H", "runner.go:ensurePodmanComposeReady", "refresh_machine", map[string]any{"runId": "post-fix"})
+	// #endregion
+	_, _ = r.execPodmanMachine(ctx, "stop")
+	stderr, err := r.execPodmanMachine(ctx, "start")
+	if err != nil && !isPodmanMachineAlreadyRunning(stderr) {
+		if r.CheckEngineHealth(ctx, "podman") != EngineOnline {
+			return fmt.Errorf("%w: refresh podman machine for compose API: %v (%s)", ErrEngineStartFailed, err, stderr)
+		}
+	}
+	_ = r.repairPodmanDefaultConnection(ctx)
+
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, engineStartTimeout)
+		defer cancel()
+		deadline, _ = ctx.Deadline()
+	}
+	for {
+		if r.podmanComposeAPIReady(ctx) {
+			return nil
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			return fmt.Errorf("%w: podman Docker API pipe not ready (compose needs npipe forwarding)", ErrEngineStartFailed)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("%w: podman Docker API pipe not ready (compose needs npipe forwarding)", ErrEngineStartFailed)
+		case <-time.After(enginePollInterval):
+		}
+	}
+}
+
+func isPodmanComposePipeError(stderr string) bool {
+	lower := strings.ToLower(stderr)
+	return strings.Contains(lower, "pipe") && (strings.Contains(lower, "eof") || strings.Contains(lower, "error during connect"))
 }
 
 func (r *Runner) waitUntilOnline(ctx context.Context, runtimeName string) error {
@@ -272,8 +593,16 @@ func (r *Runner) Start(ctx context.Context, inst *DatabaseInstance) error {
 		return fmt.Errorf("%w: %s daemon is not running", ErrEngineOffline, inst.Runtime)
 	}
 
-	cmdCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	cmdCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
+
+	if inst.Runtime == "podman" {
+		if err := r.startPodmanContainer(cmdCtx, inst); err != nil {
+			return err
+		}
+		inst.Status = StatusStarting
+		return nil
+	}
 
 	bin, args := r.BuildComposeArgs(inst, "up", "-d")
 	cmd := exec.CommandContext(cmdCtx, bin, args...)
@@ -281,7 +610,11 @@ func (r *Runner) Start(ctx context.Context, inst *DatabaseInstance) error {
 	cmd.Stderr = &errBuf
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to start container: %s (%w)", strings.TrimSpace(errBuf.String()), err)
+		detail := FormatComposeStderr(errBuf.String())
+		if detail == "" {
+			detail = err.Error()
+		}
+		return fmt.Errorf("failed to start container: %s (%w)", detail, err)
 	}
 	inst.Status = StatusStarting
 	return nil
@@ -292,13 +625,26 @@ func (r *Runner) Stop(ctx context.Context, inst *DatabaseInstance) error {
 	cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	if inst.Runtime == "podman" {
+		if err := r.stopPodmanContainer(cmdCtx, inst); err != nil {
+			return err
+		}
+		inst.Status = StatusStopped
+		inst.MemoryUsage = "-"
+		return nil
+	}
+
 	bin, args := r.BuildComposeArgs(inst, "down")
 	cmd := exec.CommandContext(cmdCtx, bin, args...)
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to stop container: %s (%w)", strings.TrimSpace(errBuf.String()), err)
+		detail := FormatComposeStderr(errBuf.String())
+		if detail == "" {
+			detail = err.Error()
+		}
+		return fmt.Errorf("failed to stop container: %s (%w)", detail, err)
 	}
 	inst.Status = StatusStopped
 	inst.MemoryUsage = "-"
@@ -310,13 +656,26 @@ func (r *Runner) DownVolumes(ctx context.Context, inst *DatabaseInstance) error 
 	cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	if inst.Runtime == "podman" {
+		if err := r.purgePodmanContainer(cmdCtx, inst); err != nil {
+			return err
+		}
+		inst.Status = StatusStopped
+		inst.MemoryUsage = "-"
+		return nil
+	}
+
 	bin, args := r.BuildComposeArgs(inst, "down", "-v")
 	cmd := exec.CommandContext(cmdCtx, bin, args...)
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to purge container: %s (%w)", strings.TrimSpace(errBuf.String()), err)
+		detail := FormatComposeStderr(errBuf.String())
+		if detail == "" {
+			detail = err.Error()
+		}
+		return fmt.Errorf("failed to purge container: %s (%w)", detail, err)
 	}
 	inst.Status = StatusStopped
 	inst.MemoryUsage = "-"
@@ -358,12 +717,19 @@ func (r *Runner) CheckStatus(ctx context.Context, inst *DatabaseInstance) Contai
 }
 
 func isTCPPortReady(port int) bool {
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 200*time.Millisecond)
-	if err != nil {
-		return false
+	addrs := []string{
+		fmt.Sprintf("127.0.0.1:%d", port),
+		fmt.Sprintf("[::1]:%d", port),
 	}
-	_ = conn.Close()
-	return true
+	for _, addr := range addrs {
+		conn, err := net.DialTimeout("tcp", addr, 400*time.Millisecond)
+		if err != nil {
+			continue
+		}
+		_ = conn.Close()
+		return true
+	}
+	return false
 }
 
 // GetMemoryUsage retrieves memory consumption stats for the container.
@@ -397,6 +763,9 @@ func (r *Runner) GetMemoryUsage(ctx context.Context, inst *DatabaseInstance) str
 
 // LogsCommand prepares a command for streaming container logs.
 func (r *Runner) LogsCommand(inst *DatabaseInstance) *exec.Cmd {
+	if inst.Runtime == "podman" {
+		return exec.Command("podman", "logs", "--tail=100", "-f", inst.ContainerName)
+	}
 	bin, args := r.BuildComposeArgs(inst, "logs", "--tail=100", "-f")
 	return exec.Command(bin, args...)
 }

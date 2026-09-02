@@ -325,12 +325,21 @@ func TestWizardBackAndEmptyBackspace(t *testing.T) {
 	m := &AppModel{mode: ModeWizard, wizard: w}
 
 	_, _ = m.updateWizard(key("b"))
-	if m.wizard.step != StepVersion {
-		t.Fatalf("b from Name -> Version, got %v", m.wizard.step)
+	if m.wizard.step != StepName {
+		t.Fatalf("letter b must type into Name, got step %v", m.wizard.step)
+	}
+	if m.wizard.inputs[0].Value() != "b" {
+		t.Fatalf("name=%q, want b", m.wizard.inputs[0].Value())
 	}
 
-	m.wizard.setFocus(StepName)
 	m.wizard.inputs[0].SetValue("")
+	_, _ = m.updateWizard(tea.KeyMsg{Type: tea.KeyUp})
+	if m.wizard.step != StepVersion {
+		t.Fatalf("up from Name -> Version, got %v", m.wizard.step)
+	}
+
+	m.wizard.maxReached = StepName
+	m.wizard.setFocus(StepName)
 	_, _ = m.updateWizard(tea.KeyMsg{Type: tea.KeyBackspace})
 	if m.wizard.step != StepVersion {
 		t.Fatalf("empty backspace -> Version, got %v", m.wizard.step)
@@ -438,8 +447,11 @@ func TestWizardFooterShowsNavHints(t *testing.T) {
 	m.wizard = newWizardModel("/tmp", "/tmp/instances", nil)
 	plain := stripANSI(m.viewWizard())
 	if !strings.Contains(plain, "[↑↓] rows") || !strings.Contains(plain, "[←→] options") ||
-		!strings.Contains(plain, "[b] back") {
+		!strings.Contains(plain, "[Esc] cancel") {
 		t.Fatalf("footer missing nav hints:\n%s", plain)
+	}
+	if strings.Contains(plain, "[b] back") {
+		t.Fatalf("letter b must not be a back shortcut while typing:\n%s", plain)
 	}
 }
 
@@ -1037,6 +1049,55 @@ POSTGRES_VOLUME=v
 	}
 }
 
+func TestWizardSaveSanitizesSpacesInNames(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	w := newWizardModel("/tmp", dir, nil)
+	w.selectedEngineIdx = 0
+	w.inputs[0].SetValue("My Shop")
+	w.inputs[1].SetValue("pg-My Shop")
+	w.inputs[2].SetValue("5432")
+	w.inputs[3].SetValue("My Shop_db")
+	w.inputs[4].SetValue("secret")
+	w.inputs[5].SetValue("512M")
+	if err := w.saveInstance(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "my_shop.env")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if !strings.Contains(s, "CONTAINER_NAME=pg_my_shop") {
+		t.Fatalf("container not sanitized: %s", s)
+	}
+	if !strings.Contains(s, "POSTGRES_DB=my_shop_db") {
+		t.Fatalf("db not sanitized: %s", s)
+	}
+	if !strings.Contains(s, "POSTGRES_VOLUME=pgdata_my_shop_18") {
+		t.Fatalf("volume not sanitized: %s", s)
+	}
+}
+
+func TestWizardVimKeysDoNotStealTextInput(t *testing.T) {
+	t.Parallel()
+	w := newWizardModel("/tmp", "/tmp", nil)
+	w.maxReached = StepName
+	w.setFocus(StepName)
+	m := &AppModel{mode: ModeWizard, wizard: w}
+	for _, letter := range []string{"j", "k", "h", "l", "b", "o"} {
+		before := m.wizard.inputs[0].Value()
+		_, _ = m.updateWizard(key(letter))
+		if m.wizard.step != StepName {
+			t.Fatalf("%q changed step to %v", letter, m.wizard.step)
+		}
+		if m.wizard.inputs[0].Value() != before+letter {
+			t.Fatalf("%q not typed: got %q", letter, m.wizard.inputs[0].Value())
+		}
+	}
+}
+
 func TestEditWizardPreloadsPostgresVersion(t *testing.T) {
 	t.Parallel()
 	inst := &core.DatabaseInstance{
@@ -1142,5 +1203,61 @@ POSTGRES_VOLUME=pgdata_shop_16
 	}
 	if !strings.Contains(m.statusMsg, "Restart container with new config?") {
 		t.Fatalf("expected restart prompt in status, got %q", m.statusMsg)
+	}
+}
+
+func TestEditWizardRuntimeIsLocked(t *testing.T) {
+	t.Parallel()
+	inst := &core.DatabaseInstance{
+		Name: "shop", EngineType: "postgres", Runtime: "docker",
+		ContainerName: "pg-shop", Port: 5432, Database: "db",
+		Password: "p", Volume: "pgdata_shop_18", MemoryLimit: "512M",
+		Version: "18", EnvFilePath: "/tmp/shop.env",
+	}
+	w := newEditWizardModel("/tmp", "/tmp", nil, inst)
+	if w.selectedRuntimeIdx != 0 {
+		t.Fatalf("runtime idx=%d, want docker(0)", w.selectedRuntimeIdx)
+	}
+
+	w.step = StepEngine
+	w.maxReached = StepReview
+	if !w.confirmAdvance() {
+		t.Fatal("engine confirm")
+	}
+	if w.step != StepVersion {
+		t.Fatalf("edit should skip Runtime focus, got step %v", w.step)
+	}
+
+	w.step = StepRuntime
+	w.cycleOption(1)
+	if w.selectedRuntimeIdx != 0 {
+		t.Fatalf("cycle must not change locked runtime, got %d", w.selectedRuntimeIdx)
+	}
+
+	w.step = StepEngine
+	w.moveFocus(1)
+	if w.step != StepVersion {
+		t.Fatalf("moveFocus should skip Runtime, got %v", w.step)
+	}
+}
+
+func TestEditWizardShowsRuntimeLockedPreview(t *testing.T) {
+	t.Parallel()
+	inst := &core.DatabaseInstance{
+		Name: "shop", EngineType: "postgres", Runtime: "podman",
+		ContainerName: "pg-shop", Port: 5432, Database: "db",
+		Password: "p", Volume: "pgdata_shop_18", MemoryLimit: "512M",
+		Version: "18", EnvFilePath: "/tmp/shop.env", Status: core.StatusStopped,
+	}
+	m := NewApp("/tmp", config.Config{EngineHealthInterval: time.Second})
+	m.width, m.height = 120, 36
+	m.wizard = newEditWizardModel("/tmp", "/tmp", nil, inst)
+	m.mode = ModeWizard
+	plain := stripANSI(m.viewWizardDock(60, 20))
+	if !strings.Contains(plain, "locked") {
+		t.Fatalf("expected locked runtime preview, got %q", plain)
+	}
+	if !strings.Contains(plain, "Podman") && !strings.Contains(plain, "podman") {
+		t.Fatalf("expected Podman label, got %q", plain)
 	}
 }

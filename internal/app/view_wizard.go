@@ -93,7 +93,7 @@ func defaultPostgresVersionIdx() int {
 }
 
 func (w *wizardModel) derivedVolume() string {
-	name := strings.TrimSpace(w.inputs[0].Value())
+	name := core.SanitizeIdent(w.inputs[0].Value())
 	engine := w.engines[w.selectedEngineIdx]
 	ver := ""
 	if engine == "postgres" {
@@ -114,10 +114,20 @@ func (w *wizardModel) isPostgres() bool {
 }
 
 func (w *wizardModel) adjustStepForEngine(step wizardStep) wizardStep {
+	if w.kind == wizardEdit && step == StepRuntime {
+		if w.isPostgres() {
+			return StepVersion
+		}
+		return StepName
+	}
 	if !w.isPostgres() && step == StepVersion {
 		return StepName
 	}
 	return step
+}
+
+func (w *wizardModel) runtimeLocked() bool {
+	return w.kind == wizardEdit
 }
 
 func (w *wizardModel) blurAll() {
@@ -249,12 +259,28 @@ func (w *wizardModel) setFocus(step wizardStep) {
 
 func (w *wizardModel) moveFocus(delta int) {
 	next := w.step + wizardStep(delta)
+	if w.runtimeLocked() {
+		if delta > 0 && next == StepRuntime {
+			if w.isPostgres() {
+				next = StepVersion
+			} else {
+				next = StepName
+			}
+		}
+		if delta < 0 && next == StepRuntime {
+			next = StepEngine
+		}
+	}
 	if !w.isPostgres() {
 		if delta > 0 && next == StepVersion {
 			next = StepName
 		}
 		if delta < 0 && next == StepVersion {
-			next = StepRuntime
+			if w.runtimeLocked() {
+				next = StepEngine
+			} else {
+				next = StepRuntime
+			}
 		}
 	}
 	w.setFocus(next)
@@ -272,6 +298,9 @@ func (w *wizardModel) cycleOption(delta int) {
 		}
 		w.selectedEngineIdx = n
 	case StepRuntime:
+		if w.runtimeLocked() {
+			return
+		}
 		n := w.selectedRuntimeIdx + delta
 		if n < 0 {
 			n = 0
@@ -296,6 +325,16 @@ func (w *wizardModel) confirmAdvance() bool {
 	switch w.step {
 	case StepEngine:
 		w.maxReached = maxStep(w.maxReached, StepRuntime)
+		if w.runtimeLocked() {
+			if w.isPostgres() {
+				w.maxReached = maxStep(w.maxReached, StepVersion)
+				w.setFocus(StepVersion)
+			} else {
+				w.maxReached = maxStep(w.maxReached, StepName)
+				w.setFocus(StepName)
+			}
+			return true
+		}
 		w.setFocus(StepRuntime)
 		return true
 	case StepRuntime:
@@ -312,7 +351,7 @@ func (w *wizardModel) confirmAdvance() bool {
 		w.setFocus(StepName)
 		return true
 	case StepName:
-		name := strings.TrimSpace(w.inputs[0].Value())
+		name := core.SanitizeIdent(w.inputs[0].Value())
 		if name == "" {
 			return false
 		}
@@ -359,7 +398,10 @@ func (w *wizardModel) applyNameAutofill() {
 	if w.kind == wizardEdit {
 		return
 	}
-	name := strings.TrimSpace(w.inputs[0].Value())
+	name := core.SanitizeIdent(w.inputs[0].Value())
+	if name != w.inputs[0].Value() {
+		w.inputs[0].SetValue(name)
+	}
 	engine := w.engines[w.selectedEngineIdx]
 
 	prefix, _, defaultPort, defaultPass, defaultMem := engineDefaults(engine)
@@ -393,7 +435,7 @@ func (w *wizardModel) applyEngineDefaults(prevEngine, nextEngine string) {
 	if prevEngine == nextEngine {
 		return
 	}
-	name := strings.TrimSpace(w.inputs[0].Value())
+	name := core.SanitizeIdent(w.inputs[0].Value())
 	prevP, _, prevPort, prevPass, prevMem := engineDefaults(prevEngine)
 	nextP, _, nextPort, nextPass, nextMem := engineDefaults(nextEngine)
 
@@ -429,11 +471,16 @@ func mustAtoi(s string) int {
 	return n
 }
 
+func (w *wizardModel) onTextStep() bool {
+	return w.step >= StepName && w.step <= StepMemoryLimit
+}
+
 func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	w := &m.wizard
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		onText := w.onTextStep()
 		switch msg.String() {
 		case "esc", "ctrl+c":
 			m.mode = ModeMain
@@ -446,7 +493,7 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "o":
-			if w.kind == wizardEdit {
+			if w.kind == wizardEdit && !onText {
 				if err := core.OpenInEditor(w.sourceEnvPath); err != nil {
 					m.statusMsg = fmt.Sprintf("Failed to open editor: %v", err)
 					m.statusIsErr = true
@@ -459,7 +506,7 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "enter":
 			if w.step == StepReview {
-				name := strings.TrimSpace(w.inputs[0].Value())
+				name := core.SanitizeIdent(w.inputs[0].Value())
 				if w.nameTaken(name) {
 					m.statusMsg = fmt.Sprintf("Instance name '%s' is already taken", name)
 					m.statusIsErr = true
@@ -521,38 +568,68 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			_ = w.confirmAdvance()
 			return m, nil
 
-		case "up", "k":
+		case "up":
 			w.moveFocus(-1)
 			return m, nil
 
-		case "down", "j":
+		case "down":
 			w.moveFocus(1)
 			return m, nil
 
-		case "left", "h":
-			prev := w.engines[w.selectedEngineIdx]
-			w.cycleOption(-1)
-			if w.step == StepEngine {
-				w.applyEngineDefaults(prev, w.engines[w.selectedEngineIdx])
-			}
-			return m, nil
-
-		case "right", "l":
-			prev := w.engines[w.selectedEngineIdx]
-			w.cycleOption(1)
-			if w.step == StepEngine {
-				w.applyEngineDefaults(prev, w.engines[w.selectedEngineIdx])
-			}
-			return m, nil
-
-		case "b":
-			if w.step > StepEngine {
+		case "k":
+			if !onText {
 				w.moveFocus(-1)
+				return m, nil
 			}
-			return m, nil
+
+		case "j":
+			if !onText {
+				w.moveFocus(1)
+				return m, nil
+			}
+
+		case "left":
+			if !onText {
+				prev := w.engines[w.selectedEngineIdx]
+				w.cycleOption(-1)
+				if w.step == StepEngine {
+					w.applyEngineDefaults(prev, w.engines[w.selectedEngineIdx])
+				}
+				return m, nil
+			}
+
+		case "right":
+			if !onText {
+				prev := w.engines[w.selectedEngineIdx]
+				w.cycleOption(1)
+				if w.step == StepEngine {
+					w.applyEngineDefaults(prev, w.engines[w.selectedEngineIdx])
+				}
+				return m, nil
+			}
+
+		case "h":
+			if !onText {
+				prev := w.engines[w.selectedEngineIdx]
+				w.cycleOption(-1)
+				if w.step == StepEngine {
+					w.applyEngineDefaults(prev, w.engines[w.selectedEngineIdx])
+				}
+				return m, nil
+			}
+
+		case "l":
+			if !onText {
+				prev := w.engines[w.selectedEngineIdx]
+				w.cycleOption(1)
+				if w.step == StepEngine {
+					w.applyEngineDefaults(prev, w.engines[w.selectedEngineIdx])
+				}
+				return m, nil
+			}
 
 		case "backspace":
-			if w.step >= StepName && w.step <= StepMemoryLimit {
+			if onText {
 				idx := int(w.step) - int(StepName)
 				if w.inputs[idx].Value() == "" {
 					if w.step > StepEngine {
@@ -564,7 +641,7 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	if w.step >= StepName && w.step <= StepMemoryLimit {
+	if w.onTextStep() {
 		idx := int(w.step) - int(StepName)
 		var cmd tea.Cmd
 		w.inputs[idx], cmd = w.inputs[idx].Update(msg)
@@ -575,7 +652,7 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (w *wizardModel) nameTaken(name string) bool {
-	name = strings.TrimSpace(name)
+	name = core.SanitizeIdent(name)
 	for _, inst := range w.instances {
 		if inst.Name == name {
 			if w.kind == wizardEdit && name == w.sourceName {
@@ -588,14 +665,23 @@ func (w *wizardModel) nameTaken(name string) bool {
 }
 
 func (w *wizardModel) saveInstance() error {
-	name := strings.TrimSpace(w.inputs[0].Value())
-	containerName := strings.TrimSpace(w.inputs[1].Value())
+	name := core.SanitizeIdent(w.inputs[0].Value())
+	containerName := core.SanitizeIdent(w.inputs[1].Value())
 	port := strings.TrimSpace(w.inputs[2].Value())
-	db := strings.TrimSpace(w.inputs[3].Value())
+	db := core.SanitizeIdent(w.inputs[3].Value())
 	pass := strings.TrimSpace(w.inputs[4].Value())
 	memLimit := strings.TrimSpace(w.inputs[5].Value())
 	if memLimit == "" {
 		memLimit = "512M"
+	}
+	if name != "" {
+		w.inputs[0].SetValue(name)
+	}
+	if containerName != "" {
+		w.inputs[1].SetValue(containerName)
+	}
+	if db != "" {
+		w.inputs[3].SetValue(db)
 	}
 
 	engine := w.engines[w.selectedEngineIdx]
@@ -725,9 +811,9 @@ func (w *wizardModel) wizardHintsLine(inner int) string {
 		return surfaceLine(inner, RunningStyle.Render("All set! Press [Enter] to create the instance, [↑/b] to edit, or [Esc] to cancel."))
 	}
 	if w.kind == wizardEdit {
-		return surfaceLine(inner, MutedStyle.Render("[↑↓] rows  [←→] options  [Enter] next  [b] back  [o] external editor  [Esc] cancel"))
+		return surfaceLine(inner, MutedStyle.Render("[↑↓] rows  [←→] options  [Enter] next  [o] editor  [Esc] cancel  (Runtime locked)"))
 	}
-	return surfaceLine(inner, MutedStyle.Render("[↑↓] rows  [←→] options  [Enter] next  [b] back  [Esc] cancel"))
+	return surfaceLine(inner, MutedStyle.Render("[↑↓] rows  [←→] options  [Enter] next  [Esc] cancel"))
 }
 
 func (m *AppModel) viewWizardDock(innerWidth, dockHeight int) string {
@@ -788,7 +874,10 @@ func (m *AppModel) buildWizardBodyRows(inner, inputWidth int) string {
 	}
 
 	if w.maxReached >= StepRuntime {
-		if w.step == StepRuntime {
+		runtimeLabel := runtimeDisplay(w.runtimes[w.selectedRuntimeIdx])
+		if w.runtimeLocked() {
+			content = append(content, m.wizardPreviewRow(inner, "2. Runtime:", runtimeLabel+" (locked)"))
+		} else if w.step == StepRuntime {
 			parts := []string{LabelStyle.Render("2. Runtime:")}
 			for i, r := range w.runtimes {
 				label := runtimeDisplay(r)
@@ -800,7 +889,7 @@ func (m *AppModel) buildWizardBodyRows(inner, inputWidth int) string {
 			}
 			content = append(content, row(parts...))
 		} else {
-			content = append(content, row(LabelStyle.Render("2. Runtime:"), ValueHighlightStyle.Render(runtimeDisplay(w.runtimes[w.selectedRuntimeIdx]))))
+			content = append(content, row(LabelStyle.Render("2. Runtime:"), ValueHighlightStyle.Render(runtimeLabel)))
 		}
 	}
 
