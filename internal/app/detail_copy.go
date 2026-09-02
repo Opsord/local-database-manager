@@ -78,6 +78,10 @@ func valueOriginX(fieldOriginX int) int {
 	return fieldOriginX + labelColumnWidth
 }
 
+func hitsEqual(a, b copyHit) bool {
+	return a.X == b.X && a.Y == b.Y && a.W == b.W && a.H == b.H && a.Text == b.Text
+}
+
 func findCopyHit(hits []copyHit, x, y int) (copyHit, bool) {
 	for _, h := range hits {
 		if y >= h.Y && y < h.Y+h.H && x >= h.X && x < h.X+h.W {

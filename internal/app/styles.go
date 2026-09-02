@@ -153,4 +153,9 @@ var (
 
 	BadgeUnknownStyle = BadgeStyle.Copy().
 				Foreground(MutedColor)
+
+	CopiedTokenStyle = lipgloss.NewStyle().
+				Foreground(FgText).
+				Background(SelectedBg).
+				Bold(true)
 )

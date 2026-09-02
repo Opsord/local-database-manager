@@ -394,21 +394,32 @@ func (m *AppModel) buildRightDetailsContent(rightInner, rightWidth int) string {
 		codeBoxWidth = 20
 	}
 
-	details := renderDetailRows(inst, rightWidth)
+	ox, oy, _ := m.detailsContentOrigin()
+	details := renderDetailRowsWithCopiedHit(inst, rightWidth, ox, oy, m.copiedHit)
+	fields := plainDetailFields(inst, rightWidth)
+	if rightWidth < 70 {
+		oy += len(fields)
+	} else {
+		oy += (len(fields) + 1) / 2
+	}
+	oy++ // blank row before URI/CLI
 	for i, row := range details {
 		details[i] = surfaceLine(rightInner, row)
 	}
 	details = append(details, surfaceBlankLine(rightInner))
+	uriPlain := truncateMiddle(inst.ConnectionURI(), codeBoxWidth)
+	uriValue := styleValueWithCopiedHit(uriPlain, valueOriginX(ox), oy, URIBoxStyle, m.copiedHit)
 	details = append(details, surfaceLine(rightInner, detailField("URI:",
 		lipgloss.JoinHorizontal(lipgloss.Top,
-			URIBoxStyle.Render(truncateMiddle(inst.ConnectionURI(), codeBoxWidth)),
+			uriValue,
 			surfaceGap(1),
 			MutedStyle.Render("[c] copy"),
 		),
 	)))
-	details = append(details, surfaceLine(rightInner, detailField("CLI:",
-		CLIBoxStyle.Render(truncateMiddle(inst.CLICommand(), codeBoxWidth)),
-	)))
+	oy++
+	cliPlain := truncateMiddle(inst.CLICommand(), codeBoxWidth)
+	cliValue := styleValueWithCopiedHit(cliPlain, valueOriginX(ox), oy, CLIBoxStyle, m.copiedHit)
+	details = append(details, surfaceLine(rightInner, detailField("CLI:", cliValue)))
 	return lipgloss.JoinVertical(lipgloss.Left, details...)
 }
 

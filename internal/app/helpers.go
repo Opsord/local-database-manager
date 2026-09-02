@@ -234,21 +234,88 @@ func styledDetailValue(label string, plainValue string, inst *core.DatabaseInsta
 	}
 }
 
-func renderDetailRows(inst *core.DatabaseInstance, panelWidth int) []string {
-	plain := plainDetailFields(inst, panelWidth)
-	fields := make([]struct {
-		label string
-		value string
-	}, len(plain))
-	for i, f := range plain {
-		fields[i].label = f.Label
-		fields[i].value = styledDetailValue(f.Label, f.Value, inst)
+func styleValueWithCopiedHit(plain string, valueOriginX, rowY int, base lipgloss.Style, copied *copyHit) string {
+	if plain == "" {
+		return base.Render(plain)
 	}
+	var parts []string
+	pos := 0
+	for _, tok := range tokenizeValue(plain) {
+		if tok.Start > pos {
+			parts = append(parts, base.Render(plain[pos:tok.Start]))
+		}
+		prov := copyHit{
+			X:    valueOriginX + displayWidth(plain[:tok.Start]),
+			Y:    rowY,
+			W:    displayWidth(tok.Text),
+			H:    1,
+			Text: tok.Text,
+		}
+		if copied != nil && hitsEqual(*copied, prov) {
+			parts = append(parts, CopiedTokenStyle.Render(tok.Text))
+		} else {
+			parts = append(parts, base.Render(tok.Text))
+		}
+		pos = tok.End
+	}
+	if pos < len(plain) {
+		parts = append(parts, base.Render(plain[pos:]))
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+}
+
+func statusValueStyle(status core.ContainerStatus) lipgloss.Style {
+	switch status {
+	case core.StatusReady:
+		return RunningStyle
+	case core.StatusStarting:
+		return StartingStyle
+	case core.StatusUnknown:
+		return UnknownStyle
+	default:
+		return StoppedStyle
+	}
+}
+
+func styleStatusWithCopiedHit(status core.ContainerStatus, valueOriginX, rowY int, copied *copyHit) string {
+	s := statusValueStyle(status)
+	icon := statusIconPlain(status)
+	iconPart := s.Render(icon)
+	spacePart := lipgloss.NewStyle().Background(BgSurface).Render(" ")
+	wordPlain := statusPlainText(status)
+	wordOriginX := valueOriginX + displayWidth(icon+" ")
+	wordPart := styleValueWithCopiedHit(wordPlain, wordOriginX, rowY, s, copied)
+	return lipgloss.JoinHorizontal(lipgloss.Top, iconPart, spacePart, wordPart)
+}
+
+func styledDetailValueWithCopiedHit(label, plainValue string, inst *core.DatabaseInstance, valueOriginX, rowY int, copied *copyHit) string {
+	switch label {
+	case "Engine:", "Port:":
+		return styleValueWithCopiedHit(plainValue, valueOriginX, rowY, ValueHighlightStyle, copied)
+	case "Status:":
+		if copied == nil {
+			return statusLabel(inst.Status)
+		}
+		return styleStatusWithCopiedHit(inst.Status, valueOriginX, rowY, copied)
+	default:
+		return styleValueWithCopiedHit(plainValue, valueOriginX, rowY, ValueStyle, copied)
+	}
+}
+
+func renderDetailRows(inst *core.DatabaseInstance, panelWidth int) []string {
+	return renderDetailRowsWithCopiedHit(inst, panelWidth, 0, 0, nil)
+}
+
+func renderDetailRowsWithCopiedHit(inst *core.DatabaseInstance, panelWidth int, originX, originY int, copied *copyHit) []string {
+	plain := plainDetailFields(inst, panelWidth)
 
 	if panelWidth < 70 {
-		rows := make([]string, 0, len(fields))
-		for _, f := range fields {
-			rows = append(rows, detailField(f.label, f.value))
+		rows := make([]string, 0, len(plain))
+		rowY := originY
+		for _, f := range plain {
+			value := styledDetailValueWithCopiedHit(f.Label, f.Value, inst, valueOriginX(originX), rowY, copied)
+			rows = append(rows, detailField(f.Label, value))
+			rowY++
 		}
 		return rows
 	}
@@ -261,14 +328,19 @@ func renderDetailRows(inst *core.DatabaseInstance, panelWidth int) []string {
 	col2Style := lipgloss.NewStyle().Width(col2W).Background(BgSurface)
 
 	var rows []string
-	for i := 0; i < len(fields); i += 2 {
-		left := col1Style.Render(detailField(fields[i].label, fields[i].value))
-		if i+1 < len(fields) {
-			right := col2Style.Render(detailField(fields[i+1].label, fields[i+1].value))
+	rowY := originY
+	for i := 0; i < len(plain); i += 2 {
+		leftValue := styledDetailValueWithCopiedHit(plain[i].Label, plain[i].Value, inst, valueOriginX(originX), rowY, copied)
+		left := col1Style.Render(detailField(plain[i].Label, leftValue))
+		if i+1 < len(plain) {
+			col2X := originX + col1W + colGap
+			rightValue := styledDetailValueWithCopiedHit(plain[i+1].Label, plain[i+1].Value, inst, valueOriginX(col2X), rowY, copied)
+			right := col2Style.Render(detailField(plain[i+1].Label, rightValue))
 			rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, left, surfaceGap(colGap), right))
 		} else {
 			rows = append(rows, left)
 		}
+		rowY++
 	}
 	return rows
 }

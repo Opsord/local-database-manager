@@ -9,6 +9,8 @@ import (
 	"local-database-manager/internal/core"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 func TestTokenizeValue(t *testing.T) {
@@ -241,6 +243,63 @@ func TestSelectionChangeClearsCopiedHit(t *testing.T) {
 	am := updated.(*AppModel)
 	if am.copiedHit != nil {
 		t.Fatalf("expected clear on selection change, got %#v", am.copiedHit)
+	}
+}
+
+func TestStyleValueWithCopiedHitHighlightsMatchingToken(t *testing.T) {
+	// SetColorProfile is process-global; do not run this in parallel.
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	plain := "POSTGRES (DOCKER)"
+	originX, rowY := 100, 7
+	hits := appendValueTokenHits(nil, originX, rowY, plain)
+	if len(hits) < 2 {
+		t.Fatal("expected tokens")
+	}
+	copied := hits[1] // DOCKER
+	base := ValueStyle
+	out := styleValueWithCopiedHit(plain, originX, rowY, base, &copied)
+	plainOut := styleValueWithCopiedHit(plain, originX, rowY, base, nil)
+	if out == plainOut {
+		t.Fatal("expected highlighted render to differ when copiedHit matches")
+	}
+	if !strings.Contains(out, "DOCKER") {
+		t.Fatalf("missing token text: %q", out)
+	}
+}
+
+func TestBuildRightDetailsContentIncludesHighlightWhenCopiedHitSet(t *testing.T) {
+	// SetColorProfile is process-global; do not run this in parallel.
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	m := NewApp(t.TempDir(), config.Config{})
+	m.width, m.height = 120, 40
+	m.instances = []*core.DatabaseInstance{{
+		Name: "shop", EngineType: "postgres", Runtime: "docker",
+		User: "postgres", Port: 5432, Status: core.StatusReady,
+		MemoryUsage: "-", MemoryLimit: "-", Database: "shop", Schema: "public", Version: "16",
+		ContainerName: "c", Volume: "v", ProjectName: "p",
+	}}
+	m.selectedIndex = 0
+	m.refreshDetailHits()
+	var userHit *copyHit
+	for i := range m.detailHits {
+		if m.detailHits[i].Text == "postgres" {
+			h := m.detailHits[i]
+			userHit = &h
+			break
+		}
+	}
+	if userHit == nil {
+		t.Fatal("expected postgres hit")
+	}
+	m.copiedHit = userHit
+	inner := screenInnerWidth(m.width)
+	_, rightWidth, _ := splitPanelWidths(inner)
+	rightInner := panelInnerWidth(rightWidth)
+	withHL := m.buildRightDetailsContent(rightInner, rightWidth)
+	m.copiedHit = nil
+	without := m.buildRightDetailsContent(rightInner, rightWidth)
+	if withHL == without {
+		t.Fatal("expected details content to change when copiedHit is set")
 	}
 }
 
