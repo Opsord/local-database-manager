@@ -116,6 +116,30 @@ func TestBuildDetailHitsIncludesUserToken(t *testing.T) {
 	}
 }
 
+func TestBuildDetailHitsStatusTokenAlignedWithIcon(t *testing.T) {
+	inst := &core.DatabaseInstance{
+		EngineType: "postgres", Runtime: "docker", Status: core.StatusReady,
+		MemoryUsage: "-", MemoryLimit: "-", User: "u", Port: 1,
+	}
+	originX := 50
+	hits := buildDetailHits(inst, 40, 36, originX, 10, 100)
+	var statusHit *copyHit
+	for i := range hits {
+		if hits[i].Text == "RUNNING" {
+			statusHit = &hits[i]
+			break
+		}
+	}
+	if statusHit == nil {
+		t.Fatalf("expected RUNNING token hit, got %+v", hits)
+	}
+	prefix := statusIconPlain(core.StatusReady) + " "
+	wantX := valueOriginX(originX) + displayWidth(prefix)
+	if statusHit.X != wantX {
+		t.Fatalf("RUNNING hit X=%d want %d (icon prefix width %d)", statusHit.X, wantX, displayWidth(prefix))
+	}
+}
+
 func TestBuildDetailHitsRespectsMaxY(t *testing.T) {
 	inst := &core.DatabaseInstance{
 		EngineType: "postgres", Runtime: "docker", User: "postgres", Port: 1,
@@ -126,6 +150,18 @@ func TestBuildDetailHitsRespectsMaxY(t *testing.T) {
 		if h.Y >= 1 {
 			t.Fatalf("hit beyond maxY: %+v", h)
 		}
+	}
+}
+
+func TestDetailsContentOriginWizardHasSmallerMaxY(t *testing.T) {
+	m := NewApp(t.TempDir(), config.Config{})
+	m.width, m.height = 120, 40
+	m.mode = ModeMain
+	_, _, maxYMain := m.detailsContentOrigin()
+	m.mode = ModeWizard
+	_, _, maxYWizard := m.detailsContentOrigin()
+	if maxYWizard >= maxYMain {
+		t.Fatalf("wizard maxY=%d should be < main maxY=%d", maxYWizard, maxYMain)
 	}
 }
 

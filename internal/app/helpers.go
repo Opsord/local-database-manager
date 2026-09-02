@@ -193,6 +193,12 @@ func statusPlainText(status core.ContainerStatus) string {
 	}
 }
 
+// statusDisplayPlain matches statusLabel layout (icon + space + word) without ANSI,
+// so double-click hit boxes align with the visible status token.
+func statusDisplayPlain(status core.ContainerStatus) string {
+	return statusIconPlain(status) + " " + statusPlainText(status)
+}
+
 func plainDetailFields(inst *core.DatabaseInstance, panelWidth int) []plainDetailField {
 	engineDesc := fmt.Sprintf("%s (%s)", strings.ToUpper(inst.EngineType), strings.ToUpper(inst.Runtime))
 	memFormatted := fmt.Sprintf("%s (Limit: %s)", inst.MemoryUsage, inst.MemoryLimit)
@@ -205,7 +211,7 @@ func plainDetailFields(inst *core.DatabaseInstance, panelWidth int) []plainDetai
 	}
 	fields = append(fields, []plainDetailField{
 		{"Container:", truncateEnd(inst.ContainerName, panelWidth-20)},
-		{"Status:", statusPlainText(inst.Status)},
+		{"Status:", statusDisplayPlain(inst.Status)},
 		{"Memory:", memFormatted},
 		{"Database:", inst.Database},
 		{"Port:", fmt.Sprintf("%d", inst.Port)},
