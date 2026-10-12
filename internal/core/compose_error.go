@@ -70,3 +70,39 @@ func truncateRunes(s string, max int) string {
 	}
 	return string(runes[:cut]) + "..."
 }
+
+// ParseComposeError analyzes stderr from compose and returns an enriched AppError
+// with actionable suggestions for the user.
+func ParseComposeError(stderr string, cause error) *AppError {
+	summary := FormatComposeStderr(stderr)
+	lower := strings.ToLower(stderr)
+
+	if strings.Contains(lower, "port is already allocated") ||
+		strings.Contains(lower, "bind: address already in use") ||
+		strings.Contains(lower, "ports are not available") {
+		return NewAppError(
+			ErrCodePortInUse,
+			summary,
+			"Port conflict: edit instance [Enter -> e] to choose next free port",
+			cause,
+		)
+	}
+
+	if strings.Contains(lower, "daemon is not running") ||
+		strings.Contains(lower, "cannot connect to the docker daemon") ||
+		strings.Contains(lower, "is the docker daemon running") {
+		return NewAppError(
+			ErrCodeEngineOffline,
+			summary,
+			"Engine is offline: start it via [e] Engines menu",
+			cause,
+		)
+	}
+
+	return NewAppError(
+		ErrCodeComposeFailed,
+		summary,
+		"Check container logs [l] or configuration",
+		cause,
+	)
+}

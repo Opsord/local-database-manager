@@ -52,6 +52,8 @@ type engineHealthMsg struct {
 
 type engineHealthTickMsg struct{}
 
+type quitAfterStopMsg struct{}
+
 // AppModel is the root Bubble Tea application state.
 type AppModel struct {
 	projectRoot  string
@@ -89,6 +91,9 @@ type AppModel struct {
 	confirmEngineStop   bool
 	pendingStopRuntime  string
 
+	confirmQuitStopEngine bool
+	pendingQuitRuntime    string
+
 	confirmRestartAfterEdit bool
 	pendingRestartOld       *core.DatabaseInstance
 	pendingRestartNewName   string
@@ -125,6 +130,8 @@ func (m *AppModel) clearConfirms() {
 	m.pendingEngineRuntime = ""
 	m.confirmEngineStop = false
 	m.pendingStopRuntime = ""
+	m.confirmQuitStopEngine = false
+	m.pendingQuitRuntime = ""
 	m.confirmRestartAfterEdit = false
 	m.pendingRestartOld = nil
 	m.pendingRestartNewName = ""
@@ -397,6 +404,9 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.checkEngineHealthCmd(false),
 			tea.Tick(4*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }),
 		)
+
+	case quitAfterStopMsg:
+		return m, tea.Quit
 
 	case tea.MouseMsg:
 		switch m.mode {

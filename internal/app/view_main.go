@@ -60,7 +60,30 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case "q", "ctrl+c":
+			if m.dockerHealth == core.EngineOnline || m.podmanHealth == core.EngineOnline {
+				rt := "docker"
+				name := "Docker"
+				if m.dockerHealth != core.EngineOnline && m.podmanHealth == core.EngineOnline {
+					rt = "podman"
+					name = "Podman"
+				}
+				m.clearConfirms()
+				m.confirmQuitStopEngine = true
+				m.pendingQuitRuntime = rt
+				m.statusMsg = fmt.Sprintf("%s is running. Stop %s before quitting? Press 'y' to stop & quit, 'n' to keep running & quit, [Esc] to cancel", name, name)
+				m.statusIsErr = true
+				return m, nil
+			}
 			return m, tea.Quit
+
+		case "esc":
+			if m.confirmPurge || m.confirmDelete || m.confirmEngineStart || m.confirmEngineStop || m.confirmRestartAfterEdit || m.confirmQuitStopEngine {
+				m.clearConfirms()
+				m.statusMsg = "Action cancelled"
+				m.statusIsErr = false
+				return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
+			}
+			return m, nil
 
 		case "?":
 			m.mode = ModeHelp
@@ -86,7 +109,7 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedIndex--
 				m.clearCopiedHit()
 			}
-			if m.confirmPurge || m.confirmDelete || m.confirmEngineStart || m.confirmEngineStop || m.confirmRestartAfterEdit {
+			if m.confirmPurge || m.confirmDelete || m.confirmEngineStart || m.confirmEngineStop || m.confirmRestartAfterEdit || m.confirmQuitStopEngine {
 				m.clearConfirms()
 				m.statusMsg = ""
 			}
@@ -98,7 +121,7 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedIndex++
 				m.clearCopiedHit()
 			}
-			if m.confirmPurge || m.confirmDelete || m.confirmEngineStart || m.confirmEngineStop || m.confirmRestartAfterEdit {
+			if m.confirmPurge || m.confirmDelete || m.confirmEngineStart || m.confirmEngineStop || m.confirmRestartAfterEdit || m.confirmQuitStopEngine {
 				m.clearConfirms()
 				m.statusMsg = ""
 			}
@@ -184,6 +207,15 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "y":
+			if m.confirmQuitStopEngine {
+				runtime := m.pendingQuitRuntime
+				m.confirmQuitStopEngine = false
+				m.pendingQuitRuntime = ""
+				name := engineDisplayName(runtime)
+				m.statusMsg = fmt.Sprintf("Stopping %s and quitting...", name)
+				m.statusIsErr = false
+				return m, m.stopEngineAndQuitCmd(runtime)
+			}
 			if m.confirmRestartAfterEdit {
 				old := m.pendingRestartOld
 				newName := m.pendingRestartNewName
@@ -234,6 +266,11 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "n":
+			if m.confirmQuitStopEngine {
+				m.confirmQuitStopEngine = false
+				m.pendingQuitRuntime = ""
+				return m, tea.Quit
+			}
 			if m.confirmRestartAfterEdit {
 				m.confirmRestartAfterEdit = false
 				m.pendingRestartOld = nil
@@ -286,6 +323,13 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m *AppModel) stopEngineAndQuitCmd(runtime string) tea.Cmd {
+	return func() tea.Msg {
+		_ = m.runner.StopEngine(context.Background(), runtime)
+		return quitAfterStopMsg{}
+	}
 }
 
 type offlineStartMsg struct {

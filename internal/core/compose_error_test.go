@@ -40,3 +40,24 @@ func TestFormatComposeStderr_OnlyBanner(t *testing.T) {
 		t.Fatal("fallback should keep something when only banner exists")
 	}
 }
+
+func TestParseComposeError_PortConflict(t *testing.T) {
+	t.Parallel()
+	stderr := "Error response from daemon: driver failed programming external connectivity on endpoint web: Bind for 0.0.0.0:5432 failed: port is already allocated"
+	appErr := ParseComposeError(stderr, nil)
+	if appErr.Code != ErrCodePortInUse {
+		t.Fatalf("expected code %s, got %s", ErrCodePortInUse, appErr.Code)
+	}
+	if !strings.Contains(appErr.Suggestion, "choose next free port") && !strings.Contains(appErr.Suggestion, "port") {
+		t.Fatalf("expected port suggestion, got %q", appErr.Suggestion)
+	}
+}
+
+func TestParseComposeError_General(t *testing.T) {
+	t.Parallel()
+	stderr := "Error response from daemon: container failed to start"
+	appErr := ParseComposeError(stderr, nil)
+	if appErr.Code != ErrCodeComposeFailed {
+		t.Fatalf("expected code %s, got %s", ErrCodeComposeFailed, appErr.Code)
+	}
+}

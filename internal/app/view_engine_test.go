@@ -229,3 +229,83 @@ func TestMainFooterShowsEnginesShortcut(t *testing.T) {
 		t.Fatalf("footer missing Engines shortcut:\n%s", plain)
 	}
 }
+
+func TestQuitWhenEngineOfflineQuitsImmediately(t *testing.T) {
+	t.Parallel()
+	m := NewApp("/tmp", config.Config{EngineHealthInterval: time.Second})
+	m.dockerHealth = core.EngineOffline
+	m.podmanHealth = core.EngineOffline
+	m.mode = ModeMain
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	if cmd == nil || cmd() != tea.Quit() {
+		t.Fatal("expected tea.Quit when all engines are offline")
+	}
+}
+
+func TestQuitWhenDockerOnlinePromptsConfirm(t *testing.T) {
+	t.Parallel()
+	m := NewApp("/tmp", config.Config{EngineHealthInterval: time.Second})
+	m.dockerHealth = core.EngineOnline
+	m.podmanHealth = core.EngineOffline
+	m.mode = ModeMain
+
+	// Press 'q'
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	am := updated.(*AppModel)
+	if !am.confirmQuitStopEngine {
+		t.Fatal("expected confirmQuitStopEngine to be true")
+	}
+	if am.pendingQuitRuntime != "docker" {
+		t.Fatalf("pendingQuitRuntime=%q, want docker", am.pendingQuitRuntime)
+	}
+	if !strings.Contains(am.statusMsg, "Docker is running. Stop Docker before quitting?") {
+		t.Fatalf("unexpected statusMsg: %q", am.statusMsg)
+	}
+	if cmd != nil {
+		t.Fatal("expected no immediate quit command when confirm is armed")
+	}
+
+	// Press 'esc' to cancel
+	updated, _ = am.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	am = updated.(*AppModel)
+	if am.confirmQuitStopEngine {
+		t.Fatal("expected confirmQuitStopEngine to be cleared on escape")
+	}
+
+	// Re-arm with 'q'
+	updated, _ = am.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	am = updated.(*AppModel)
+
+	// Press 'n' to quit without stopping
+	_, cmd = am.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if cmd == nil || cmd() != tea.Quit() {
+		t.Fatal("expected tea.Quit on 'n'")
+	}
+
+	// Re-arm with 'q'
+	am.confirmQuitStopEngine = true
+	am.pendingQuitRuntime = "docker"
+
+	// Press 'y' to stop and quit
+	sr := &stubRunner{}
+	am.runner = sr
+	updated, cmd = am.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	am = updated.(*AppModel)
+	if am.confirmQuitStopEngine {
+		t.Fatal("expected confirmQuitStopEngine cleared after 'y'")
+	}
+	if cmd == nil {
+		t.Fatal("expected stopEngineAndQuitCmd on 'y'")
+	}
+	msg := cmd()
+	if _, ok := msg.(quitAfterStopMsg); !ok {
+		t.Fatalf("expected quitAfterStopMsg, got %T", msg)
+	}
+
+	// Handling quitAfterStopMsg returns tea.Quit
+	_, quitCmd := am.Update(msg)
+	if quitCmd == nil || quitCmd() != tea.Quit() {
+		t.Fatal("expected tea.Quit when receiving quitAfterStopMsg")
+	}
+}

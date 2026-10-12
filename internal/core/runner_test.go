@@ -220,6 +220,16 @@ func TestFindDockerDesktopExe_Windows(t *testing.T) {
 	_ = err // existence depends on machine; just ensure it doesn't panic
 }
 
+func TestLaunchDetachedProcess_Windows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows only")
+	}
+	err := launchDetachedProcess("nonexistent_binary_xyz_12345.exe", "", 0)
+	if err == nil {
+		t.Fatal("expected error for nonexistent executable, got nil")
+	}
+}
+
 func TestRunner_StopEngine_NotInstalled(t *testing.T) {
 	t.Parallel()
 	r := NewRunner("/tmp")

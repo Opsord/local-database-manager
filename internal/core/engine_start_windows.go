@@ -9,35 +9,43 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"golang.org/x/sys/windows"
 )
 
-func (r *Runner) startDockerEngine(ctx context.Context) error {
+func launchDetachedProcess(file string, args string, showCmd int32) error {
+	verbPtr := windows.StringToUTF16Ptr("open")
+	filePtr := windows.StringToUTF16Ptr(file)
+	var argsPtr *uint16
+	if args != "" {
+		argsPtr = windows.StringToUTF16Ptr(args)
+	}
+	return windows.ShellExecute(0, verbPtr, filePtr, argsPtr, nil, showCmd)
+}
+
+func startDockerDaemon(ctx context.Context, checkHealth func(context.Context) EngineHealth) error {
 	cmdCtx, cancel := context.WithTimeout(ctx, engineStartTimeout)
 	defer cancel()
 
-	// Prefer CLI start (less UI than launching the .exe). Fall back to the
-	// Desktop executable when the CLI plugin is missing or fails to start.
-	startCmd := exec.CommandContext(cmdCtx, "docker", "desktop", "start")
-	startCmd.Stdout = io.Discard
-	startCmd.Stderr = io.Discard
-	if err := startCmd.Run(); err != nil {
-		if r.CheckEngineHealth(cmdCtx, "docker") == EngineOnline {
-			return nil
-		}
-		exe, findErr := findDockerDesktopExe()
-		if findErr != nil {
-			return fmt.Errorf("%w: docker desktop start: %v (%v)", ErrEngineStartFailed, err, findErr)
-		}
-		cmd := exec.Command(exe)
-		if startErr := cmd.Start(); startErr != nil {
-			return fmt.Errorf("%w: launch Docker Desktop: %v (cli start: %v)", ErrEngineStartFailed, startErr, err)
-		}
-		_ = cmd.Process.Release()
+	var launchErr error
+	exe, findErr := findDockerDesktopExe()
+	if findErr == nil {
+		launchErr = launchDetachedProcess(exe, "", windows.SW_SHOWNORMAL)
+	} else {
+		launchErr = findErr
 	}
-	return r.waitUntilOnline(cmdCtx, "docker")
+
+	if launchErr != nil {
+		// Fallback to CLI detached launch with hidden window
+		if cliErr := launchDetachedProcess("docker", "desktop start", windows.SW_HIDE); cliErr != nil {
+			return fmt.Errorf("%w: launch Docker Desktop: %v (cli fallback: %v)", ErrEngineStartFailed, launchErr, cliErr)
+		}
+	}
+
+	return waitUntilEngineOnline(cmdCtx, checkHealth, "docker")
 }
 
-func (r *Runner) stopDockerEngine(ctx context.Context) error {
+func stopDockerDaemon(ctx context.Context, checkHealth func(context.Context) EngineHealth) error {
 	cmdCtx, cancel := context.WithTimeout(ctx, engineStartTimeout)
 	defer cancel()
 
@@ -49,7 +57,7 @@ func (r *Runner) stopDockerEngine(ctx context.Context) error {
 	stopCmd.Stderr = io.Discard
 	_ = stopCmd.Run()
 
-	return r.waitUntilOffline(cmdCtx, "docker")
+	return waitUntilEngineOffline(cmdCtx, checkHealth, "docker")
 }
 
 func findDockerDesktopExe() (string, error) {
