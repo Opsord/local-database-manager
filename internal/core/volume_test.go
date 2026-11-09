@@ -18,6 +18,35 @@ func TestNormalizePostgresVersion(t *testing.T) {
 	}
 }
 
+func TestNormalizeSQLServerVersion(t *testing.T) {
+	t.Parallel()
+	cases := []struct{ in, want string }{
+		{"", DefaultSQLServerVersion},
+		{"2022", "2022"},
+		{"azure-edge", "azure-edge"},
+		{" 2022 ", "2022"},
+		{"invalid", DefaultSQLServerVersion},
+	}
+	for _, tc := range cases {
+		if got := NormalizeSQLServerVersion(tc.in); got != tc.want {
+			t.Fatalf("NormalizeSQLServerVersion(%q)=%q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestSQLServerImageForVersion(t *testing.T) {
+	t.Parallel()
+	if got := SQLServerImageForVersion("2022"); got != "mcr.microsoft.com/mssql/server:2022-latest" {
+		t.Fatalf("SQLServerImageForVersion(2022)=%q", got)
+	}
+	if got := SQLServerImageForVersion("azure-edge"); got != "mcr.microsoft.com/azure-sql-edge:latest" {
+		t.Fatalf("SQLServerImageForVersion(azure-edge)=%q", got)
+	}
+	if got := SQLServerImageForVersion("unknown"); got != "mcr.microsoft.com/mssql/server:2022-latest" {
+		t.Fatalf("SQLServerImageForVersion(unknown)=%q", got)
+	}
+}
+
 func TestDeriveVolumeName(t *testing.T) {
 	t.Parallel()
 	if got := DeriveVolumeName("postgres", "shop", "16"); got != "pgdata_shop_16" {

@@ -134,7 +134,22 @@ func TestRenderDetailRowsOmitsVersionForSQLServer(t *testing.T) {
 	rows := renderDetailRows(inst, 120)
 	plain := stripANSI(strings.Join(rows, "\n"))
 	if strings.Contains(plain, "Version:") {
-		t.Fatalf("SQL Server details should omit Version, got:\n%s", plain)
+		t.Fatalf("SQL Server details should omit Version when empty, got:\n%s", plain)
+	}
+}
+
+func TestRenderDetailRowsIncludesSQLServerVersion(t *testing.T) {
+	t.Parallel()
+	inst := &core.DatabaseInstance{
+		EngineType: "sqlserver",
+		Runtime:    "docker",
+		Version:    core.SQLServerAzureEdge,
+		Volume:     "sqlserver_shop",
+	}
+	rows := renderDetailRows(inst, 120)
+	plain := stripANSI(strings.Join(rows, "\n"))
+	if !strings.Contains(plain, "Version:") || !strings.Contains(plain, "Azure SQL Edge") {
+		t.Fatalf("expected Azure SQL Edge Version row, got:\n%s", plain)
 	}
 }
 

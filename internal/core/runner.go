@@ -1,9 +1,11 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -46,6 +48,7 @@ type Runner struct {
 
 // NewRunner creates a new Runner configured for the specified project root.
 func NewRunner(projectRoot string) *Runner {
+	EnsureScriptLineEndings(projectRoot)
 	r := &Runner{
 		ProjectRoot: projectRoot,
 		providers:   make(map[string]RuntimeProvider),
@@ -53,6 +56,28 @@ func NewRunner(projectRoot string) *Runner {
 	r.providers["docker"] = NewDockerProvider(projectRoot)
 	r.providers["podman"] = NewPodmanProvider(projectRoot)
 	return r
+}
+
+// EnsureScriptLineEndings ensures all shell scripts under engines/ use LF line endings
+// so they can execute cleanly inside Linux containers without carriage return errors.
+func EnsureScriptLineEndings(projectRoot string) {
+	enginesDir := filepath.Join(projectRoot, "engines")
+	_ = filepath.Walk(enginesDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || info.IsDir() {
+			return nil
+		}
+		if strings.HasSuffix(strings.ToLower(info.Name()), ".sh") {
+			data, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return nil
+			}
+			if bytes.Contains(data, []byte("\r\n")) {
+				sanitized := bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
+				_ = os.WriteFile(path, sanitized, info.Mode())
+			}
+		}
+		return nil
+	})
 }
 
 func (r *Runner) providerFor(runtimeName string) RuntimeProvider {

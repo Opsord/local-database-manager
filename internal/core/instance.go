@@ -205,6 +205,25 @@ func ParseEnvFile(filePath string) (*DatabaseInstance, error) {
 		}
 		inst.Schema = schema
 		inst.Volume = rawEnv["SQLSERVER_VOLUME"]
+
+		ver := rawEnv["SQLSERVER_VERSION"]
+		if ver == "" {
+			img := rawEnv["SQLSERVER_IMAGE"]
+			if strings.Contains(strings.ToLower(img), "azure-sql-edge") {
+				ver = SQLServerAzureEdge
+			} else {
+				ver = SQLServer2022
+			}
+		}
+		inst.Version = NormalizeSQLServerVersion(ver)
+
+		if rawEnv["MEMORY_LIMIT"] == "" {
+			if inst.Version == SQLServerAzureEdge {
+				inst.MemoryLimit = "1G"
+			} else {
+				inst.MemoryLimit = "2G"
+			}
+		}
 	}
 
 	return inst, nil

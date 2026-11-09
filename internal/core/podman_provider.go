@@ -11,13 +11,18 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 // PodmanProvider implements RuntimeProvider for the Podman runtime engine.
 type PodmanProvider struct {
-	projectRoot string
+	projectRoot           string
+	mu                    sync.Mutex
+	cgroupMemoryChecked   bool
+	cgroupMemorySupported bool
 }
 
 // NewPodmanProvider creates a new PodmanProvider configured for projectRoot.
@@ -172,12 +177,35 @@ func (p *PodmanProvider) Start(ctx context.Context, inst *DatabaseInstance) erro
 		return err
 	}
 
+	if !p.supportsCgroupMemory(cmdCtx) {
+		slog.Warn("Podman host does not support cgroup memory controller; launching without --memory flag", "instance", inst.Name)
+		args = removeFlagWithValue(args, "--memory")
+	}
+
 	cmd := exec.CommandContext(cmdCtx, "podman", args...)
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 	if err := cmd.Run(); err != nil {
-		slog.Error("Failed to start Podman instance", "name", inst.Name, "error", err, "stderr", errBuf.String())
-		return ParseComposeError(errBuf.String(), err)
+		stderr := errBuf.String()
+		if strings.Contains(stderr, "memory.max") {
+			slog.Warn("OCI runtime failed on memory.max; retrying without memory limit", "instance", inst.Name)
+			p.mu.Lock()
+			p.cgroupMemoryChecked = true
+			p.cgroupMemorySupported = false
+			p.mu.Unlock()
+
+			retryArgs := removeFlagWithValue(args, "--memory")
+			retryCmd := exec.CommandContext(cmdCtx, "podman", retryArgs...)
+			var retryErrBuf bytes.Buffer
+			retryCmd.Stderr = &retryErrBuf
+			if retryErr := retryCmd.Run(); retryErr != nil {
+				return ParseComposeError(retryErrBuf.String(), retryErr)
+			}
+			inst.Status = StatusStarting
+			return nil
+		}
+		slog.Error("Failed to start Podman instance", "name", inst.Name, "error", err, "stderr", stderr)
+		return ParseComposeError(stderr, err)
 	}
 
 	inst.Status = StatusStarting
@@ -270,6 +298,72 @@ func (p *PodmanProvider) LogsCommand(inst *DatabaseInstance) *exec.Cmd {
 	return exec.Command("podman", "logs", "--tail=100", "-f", inst.ContainerName)
 }
 
+// supportsCgroupMemory checks whether the Podman host has the cgroup memory controller enabled.
+func (p *PodmanProvider) supportsCgroupMemory(ctx context.Context) bool {
+	p.mu.Lock()
+	if p.cgroupMemoryChecked {
+		res := p.cgroupMemorySupported
+		p.mu.Unlock()
+		return res
+	}
+	p.mu.Unlock()
+
+	cmdCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(cmdCtx, "podman", "info", "--format", "{{json .Host.CgroupControllers}}")
+	out, err := cmd.Output()
+	supported := false
+	if err == nil {
+		var controllers []string
+		if jsonErr := json.Unmarshal(out, &controllers); jsonErr == nil {
+			for _, c := range controllers {
+				if strings.EqualFold(c, "memory") {
+					supported = true
+					break
+				}
+			}
+		}
+	}
+
+	p.mu.Lock()
+	p.cgroupMemoryChecked = true
+	p.cgroupMemorySupported = supported
+	p.mu.Unlock()
+	return supported
+}
+
+func removeFlagWithValue(args []string, flag string) []string {
+	res := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if args[i] == flag {
+			if i+1 < len(args) {
+				i++ // skip value
+			}
+			continue
+		}
+		res = append(res, args[i])
+	}
+	return res
+}
+
+func parseMemoryMB(mem string) string {
+	mem = strings.TrimSpace(strings.ToUpper(mem))
+	if strings.HasSuffix(mem, "M") || strings.HasSuffix(mem, "MB") {
+		num := strings.TrimSuffix(strings.TrimSuffix(mem, "MB"), "M")
+		if n, err := strconv.Atoi(num); err == nil && n > 0 {
+			return strconv.Itoa(n)
+		}
+	}
+	if strings.HasSuffix(mem, "G") || strings.HasSuffix(mem, "GB") {
+		num := strings.TrimSuffix(strings.TrimSuffix(mem, "GB"), "G")
+		if n, err := strconv.Atoi(num); err == nil && n > 0 {
+			return strconv.Itoa(n * 1024)
+		}
+	}
+	return ""
+}
+
 // buildPodmanRunArgs builds `podman run` args for an instance.
 func (p *PodmanProvider) buildPodmanRunArgs(inst *DatabaseInstance) ([]string, error) {
 	name := strings.TrimSpace(inst.ContainerName)
@@ -295,6 +389,10 @@ func (p *PodmanProvider) buildPodmanRunArgs(inst *DatabaseInstance) ([]string, e
 		if vol == "" {
 			vol = "mssqldata"
 		}
+		image := SQLServerImageForVersion(inst.Version)
+		if inst.RawEnv != nil && strings.TrimSpace(inst.RawEnv["SQLSERVER_IMAGE"]) != "" {
+			image = strings.TrimSpace(inst.RawEnv["SQLSERVER_IMAGE"])
+		}
 		engineDir := filepath.Join(p.projectRoot, "engines", "sql-server")
 		args = append(args,
 			"-e", "ACCEPT_EULA=Y",
@@ -308,13 +406,18 @@ func (p *PodmanProvider) buildPodmanRunArgs(inst *DatabaseInstance) ([]string, e
 			"-v", filepath.Join(engineDir, "init")+":/init:ro",
 			"-v", filepath.Join(engineDir, "docker-entrypoint.sh")+":/entrypoint.sh:ro",
 			"--entrypoint", "/bin/bash",
-			"mcr.microsoft.com/mssql/server:2022-latest",
+			image,
 			"/entrypoint.sh",
 		)
+		mb := ""
 		if inst.RawEnv != nil {
-			if mb := strings.TrimSpace(inst.RawEnv["MSSQL_MEMORY_LIMIT_MB"]); mb != "" {
-				args = insertEnvArg(args, "MSSQL_MEMORY_LIMIT_MB="+mb)
-			}
+			mb = strings.TrimSpace(inst.RawEnv["MSSQL_MEMORY_LIMIT_MB"])
+		}
+		if mb == "" && inst.MemoryLimit != "" {
+			mb = parseMemoryMB(inst.MemoryLimit)
+		}
+		if mb != "" {
+			args = insertEnvArg(args, "MSSQL_MEMORY_LIMIT_MB="+mb)
 		}
 	default: // postgres
 		version := strings.TrimSpace(inst.Version)

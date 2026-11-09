@@ -5,9 +5,17 @@ import (
 	"unicode"
 )
 
-const DefaultPostgresVersion = "18"
+const (
+	DefaultPostgresVersion  = "18"
+	SQLServer2022           = "2022"
+	SQLServerAzureEdge      = "azure-edge"
+	DefaultSQLServerVersion = SQLServer2022
+)
 
-var PostgresVersions = []string{"14", "15", "16", "17", "18"}
+var (
+	PostgresVersions  = []string{"14", "15", "16", "17", "18"}
+	SQLServerVersions = []string{SQLServer2022, SQLServerAzureEdge}
+)
 
 // SanitizeIdent normalizes identifiers to lowercase snake_case
 // (spaces/hyphens → _, collapsed; trimmed).
@@ -41,6 +49,23 @@ func NormalizePostgresVersion(v string) string {
 		}
 	}
 	return DefaultPostgresVersion
+}
+
+func NormalizeSQLServerVersion(v string) string {
+	v = strings.TrimSpace(v)
+	for _, allowed := range SQLServerVersions {
+		if v == allowed {
+			return v
+		}
+	}
+	return DefaultSQLServerVersion
+}
+
+func SQLServerImageForVersion(ver string) string {
+	if NormalizeSQLServerVersion(ver) == SQLServerAzureEdge {
+		return "mcr.microsoft.com/azure-sql-edge:latest"
+	}
+	return "mcr.microsoft.com/mssql/server:2022-latest"
 }
 
 func DeriveVolumeName(engine, instanceName, version string) string {

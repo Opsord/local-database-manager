@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"local-database-manager/internal/core"
 
@@ -92,6 +93,25 @@ func defaultPostgresVersionIdx() int {
 	return len(core.PostgresVersions) - 1
 }
 
+func defaultVersionIdx(engine string) int {
+	if engine == "sqlserver" {
+		for i, v := range core.SQLServerVersions {
+			if v == core.DefaultSQLServerVersion {
+				return i
+			}
+		}
+		return 0
+	}
+	return defaultPostgresVersionIdx()
+}
+
+func (w *wizardModel) availableVersions() []string {
+	if w.isPostgres() {
+		return core.PostgresVersions
+	}
+	return core.SQLServerVersions
+}
+
 func (w *wizardModel) derivedVolume() string {
 	name := core.SanitizeIdent(w.inputs[0].Value())
 	engine := w.engines[w.selectedEngineIdx]
@@ -103,10 +123,26 @@ func (w *wizardModel) derivedVolume() string {
 }
 
 func (w *wizardModel) selectedVersion() string {
-	if w.selectedVersionIdx < 0 || w.selectedVersionIdx >= len(core.PostgresVersions) {
-		return core.DefaultPostgresVersion
+	versions := w.availableVersions()
+	if w.selectedVersionIdx < 0 || w.selectedVersionIdx >= len(versions) {
+		if w.isPostgres() {
+			return core.DefaultPostgresVersion
+		}
+		return core.DefaultSQLServerVersion
 	}
-	return core.PostgresVersions[w.selectedVersionIdx]
+	return versions[w.selectedVersionIdx]
+}
+
+func versionDisplay(engine, ver string) string {
+	if engine == "sqlserver" {
+		switch ver {
+		case core.SQLServer2022:
+			return "2022 (Full Developer)"
+		case core.SQLServerAzureEdge:
+			return "Azure SQL Edge (ARM64)"
+		}
+	}
+	return ver
 }
 
 func (w *wizardModel) isPostgres() bool {
@@ -115,13 +151,7 @@ func (w *wizardModel) isPostgres() bool {
 
 func (w *wizardModel) adjustStepForEngine(step wizardStep) wizardStep {
 	if w.kind == wizardEdit && step == StepRuntime {
-		if w.isPostgres() {
-			return StepVersion
-		}
-		return StepName
-	}
-	if !w.isPostgres() && step == StepVersion {
-		return StepName
+		return StepVersion
 	}
 	return step
 }
@@ -188,6 +218,7 @@ func newWizardModel(projectRoot, instancesDir string, existing []*core.DatabaseI
 		inputs:             inputs,
 		scrollViewport:     viewport.New(60, 8),
 	}
+	w.scrollViewport.Style = lipgloss.NewStyle().Background(BgSurface)
 	w.blurAll()
 	return w
 }
@@ -233,6 +264,14 @@ func newEditWizardModel(projectRoot, instancesDir string, existing []*core.Datab
 				break
 			}
 		}
+	} else if inst.EngineType == "sqlserver" && inst.Version != "" {
+		normalized := core.NormalizeSQLServerVersion(inst.Version)
+		for i, v := range core.SQLServerVersions {
+			if v == normalized {
+				w.selectedVersionIdx = i
+				break
+			}
+		}
 	}
 
 	w.maxReached = StepReview
@@ -261,26 +300,10 @@ func (w *wizardModel) moveFocus(delta int) {
 	next := w.step + wizardStep(delta)
 	if w.runtimeLocked() {
 		if delta > 0 && next == StepRuntime {
-			if w.isPostgres() {
-				next = StepVersion
-			} else {
-				next = StepName
-			}
+			next = StepVersion
 		}
 		if delta < 0 && next == StepRuntime {
 			next = StepEngine
-		}
-	}
-	if !w.isPostgres() {
-		if delta > 0 && next == StepVersion {
-			next = StepName
-		}
-		if delta < 0 && next == StepVersion {
-			if w.runtimeLocked() {
-				next = StepEngine
-			} else {
-				next = StepRuntime
-			}
 		}
 	}
 	w.setFocus(next)
@@ -310,14 +333,29 @@ func (w *wizardModel) cycleOption(delta int) {
 		}
 		w.selectedRuntimeIdx = n
 	case StepVersion:
+		versions := w.availableVersions()
 		n := w.selectedVersionIdx + delta
 		if n < 0 {
 			n = 0
 		}
-		if n >= len(core.PostgresVersions) {
-			n = len(core.PostgresVersions) - 1
+		if n >= len(versions) {
+			n = len(versions) - 1
 		}
-		w.selectedVersionIdx = n
+		if n != w.selectedVersionIdx {
+			w.selectedVersionIdx = n
+			if !w.isPostgres() {
+				currentMem := w.inputs[5].Value()
+				if w.selectedVersion() == core.SQLServerAzureEdge {
+					if currentMem == "2G" || currentMem == "" {
+						w.inputs[5].SetValue("1G")
+					}
+				} else {
+					if currentMem == "1G" || currentMem == "" {
+						w.inputs[5].SetValue("2G")
+					}
+				}
+			}
+		}
 	}
 }
 
@@ -326,25 +364,15 @@ func (w *wizardModel) confirmAdvance() bool {
 	case StepEngine:
 		w.maxReached = maxStep(w.maxReached, StepRuntime)
 		if w.runtimeLocked() {
-			if w.isPostgres() {
-				w.maxReached = maxStep(w.maxReached, StepVersion)
-				w.setFocus(StepVersion)
-			} else {
-				w.maxReached = maxStep(w.maxReached, StepName)
-				w.setFocus(StepName)
-			}
+			w.maxReached = maxStep(w.maxReached, StepVersion)
+			w.setFocus(StepVersion)
 			return true
 		}
 		w.setFocus(StepRuntime)
 		return true
 	case StepRuntime:
-		if w.isPostgres() {
-			w.maxReached = maxStep(w.maxReached, StepVersion)
-			w.setFocus(StepVersion)
-		} else {
-			w.maxReached = maxStep(w.maxReached, StepName)
-			w.setFocus(StepName)
-		}
+		w.maxReached = maxStep(w.maxReached, StepVersion)
+		w.setFocus(StepVersion)
 		return true
 	case StepVersion:
 		w.maxReached = maxStep(w.maxReached, StepName)
@@ -456,14 +484,7 @@ func (w *wizardModel) applyEngineDefaults(prevEngine, nextEngine string) {
 	if w.inputs[5].Value() == prevMem {
 		w.inputs[5].SetValue(nextMem)
 	}
-	if nextEngine == "postgres" {
-		if w.selectedVersionIdx < 0 || w.selectedVersionIdx >= len(core.PostgresVersions) {
-			w.selectedVersionIdx = defaultPostgresVersionIdx()
-		}
-	}
-	if w.step == StepVersion && !w.isPostgres() {
-		w.setFocus(StepName)
-	}
+	w.selectedVersionIdx = defaultVersionIdx(nextEngine)
 }
 
 func mustAtoi(s string) int {
@@ -482,7 +503,48 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		onText := w.onTextStep()
 		switch msg.String() {
-		case "esc", "ctrl+c":
+		case "ctrl+c":
+			if onText {
+				idx := int(w.step) - int(StepName)
+				val := w.inputs[idx].Value()
+				if val != "" {
+					if err := core.CopyToClipboard(val); err != nil {
+						m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
+						m.statusIsErr = true
+					} else {
+						m.statusMsg = fmt.Sprintf("Copied '%s' to clipboard", val)
+						m.statusIsErr = false
+					}
+					return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
+				}
+			}
+			m.mode = ModeMain
+			if w.kind == wizardEdit {
+				m.statusMsg = "Instance edit cancelled"
+			} else {
+				m.statusMsg = "Instance creation cancelled"
+			}
+			m.statusIsErr = false
+			return m, nil
+
+		case "ctrl+shift+c":
+			if onText {
+				idx := int(w.step) - int(StepName)
+				val := w.inputs[idx].Value()
+				if val != "" {
+					if err := core.CopyToClipboard(val); err != nil {
+						m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
+						m.statusIsErr = true
+					} else {
+						m.statusMsg = fmt.Sprintf("Copied '%s' to clipboard", val)
+						m.statusIsErr = false
+					}
+					return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
+				}
+			}
+			return m, nil
+
+		case "esc":
 			m.mode = ModeMain
 			if w.kind == wizardEdit {
 				m.statusMsg = "Instance edit cancelled"
@@ -628,16 +690,7 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-		case "backspace":
-			if onText {
-				idx := int(w.step) - int(StepName)
-				if w.inputs[idx].Value() == "" {
-					if w.step > StepEngine {
-						w.moveFocus(-1)
-					}
-					return m, nil
-				}
-			}
+
 		}
 	}
 
@@ -707,6 +760,8 @@ POSTGRES_VERSION=%s
 POSTGRES_VOLUME=%s
 `, runtime, containerName, containerName, memLimit, port, pass, db, version, volume)
 	} else {
+		version := w.selectedVersion()
+		image := core.SQLServerImageForVersion(version)
 		content = fmt.Sprintf(`ENGINE=sqlserver
 RUNTIME=%s
 
@@ -719,7 +774,9 @@ SA_PASSWORD=%s
 SQLSERVER_DB=%s
 SQLSERVER_SCHEMA=dbo
 SQLSERVER_VOLUME=%s
-`, runtime, containerName, containerName, memLimit, port, pass, db, volume)
+SQLSERVER_VERSION=%s
+SQLSERVER_IMAGE=%s
+`, runtime, containerName, containerName, memLimit, port, pass, db, volume, version, image)
 	}
 
 	newPath := filepath.Join(w.instancesDir, fmt.Sprintf("%s.env", name))
@@ -742,9 +799,10 @@ SQLSERVER_VOLUME=%s
 }
 
 func (m *AppModel) wizardPreviewRow(inner int, label, value string) string {
-	return lipgloss.NewStyle().Width(inner).Background(BgSurface).Render(
-		LabelStyle.Render(label) + " " + MutedStyle.Render(value),
-	)
+	return surfaceLine(inner, joinWithSurfaceGaps([]string{
+		LabelStyle.Render(label),
+		MutedStyle.Render(value),
+	}, 1))
 }
 
 func (m *AppModel) wizardValueRow(inner int, label, value string, inputIdx int, extra string) string {
@@ -757,7 +815,15 @@ func (m *AppModel) wizardValueRow(inner int, label, value string, inputIdx int, 
 		parts = append(parts, ValueStyle.Render(value))
 	}
 	if extra != "" {
-		parts = append(parts, MutedStyle.Render(extra))
+		used := 14 + 1
+		if active && w.step != StepReview {
+			used += w.inputs[inputIdx].Width + 1
+		} else {
+			used += displayWidth(value) + 1
+		}
+		if used+displayWidth(extra) <= inner {
+			parts = append(parts, MutedStyle.Render(extra))
+		}
 	}
 	return surfaceLine(inner, joinWithSurfaceGaps(parts, 1))
 }
@@ -770,9 +836,6 @@ func (w *wizardModel) bodyLineForStep(step wizardStep) int {
 	}
 	line := 0
 	for s := StepEngine; s <= focusStep; s++ {
-		if s == StepVersion && !w.isPostgres() {
-			continue
-		}
 		if s <= w.maxReached {
 			line++
 		}
@@ -825,6 +888,10 @@ func (m *AppModel) viewWizardDock(innerWidth, dockHeight int) string {
 	for i := range w.inputs {
 		w.inputs[i].Width = inputWidth
 	}
+	// Memory input is compact (e.g. "512M", "2G") and followed by recommendation text.
+	if len(w.inputs) > 5 {
+		w.inputs[5].Width = 10
+	}
 
 	titleText := "New Database Instance"
 	if w.kind == wizardEdit {
@@ -841,6 +908,7 @@ func (m *AppModel) viewWizardDock(innerWidth, dockHeight int) string {
 	body := m.buildWizardBodyRows(innerWidth, inputWidth)
 	w.scrollViewport.Width = innerWidth
 	w.scrollViewport.Height = scrollHeight
+	w.scrollViewport.Style = lipgloss.NewStyle().Background(BgSurface)
 	w.scrollViewport.SetContent(body)
 	w.syncScrollToFocus()
 
@@ -893,19 +961,41 @@ func (m *AppModel) buildWizardBodyRows(inner, inputWidth int) string {
 		}
 	}
 
-	if w.isPostgres() && w.maxReached >= StepVersion {
+	if w.maxReached >= StepVersion {
+		engine := w.engines[w.selectedEngineIdx]
 		if w.step == StepVersion {
 			parts := []string{LabelStyle.Render("3. Version:")}
-			for i, ver := range core.PostgresVersions {
+			versions := w.availableVersions()
+			for i, ver := range versions {
+				disp := versionDisplay(engine, ver)
 				if i == w.selectedVersionIdx {
-					parts = append(parts, SelectedItemStyle.Render(fmt.Sprintf(" [%s] ", ver)))
+					parts = append(parts, SelectedItemStyle.Render(fmt.Sprintf(" [%s] ", disp)))
 				} else {
-					parts = append(parts, NormalItemStyle.Render(fmt.Sprintf(" %s ", ver)))
+					parts = append(parts, NormalItemStyle.Render(fmt.Sprintf(" %s ", disp)))
 				}
 			}
 			content = append(content, row(parts...))
+			if engine == "sqlserver" {
+				var rawNote string
+				var isWarning bool
+				if w.selectedVersion() == core.SQLServerAzureEdge {
+					rawNote = "  ⚠ Note: Retired/frozen on ARM64 by Microsoft. No SQL Agent (512M-1G RAM)."
+					isWarning = true
+				} else {
+					rawNote = "  💡 Note: Full SQL Server 2022. Recommended 2G min RAM (Rosetta 2 on Apple Silicon)."
+					isWarning = false
+				}
+				if displayWidth(rawNote) > inner {
+					rawNote = truncateEnd(rawNote, inner)
+				}
+				if isWarning {
+					content = append(content, surfaceLine(inner, WarningStyle.Render(rawNote)))
+				} else {
+					content = append(content, surfaceLine(inner, MutedStyle.Render(rawNote)))
+				}
+			}
 		} else {
-			content = append(content, row(LabelStyle.Render("3. Version:"), ValueHighlightStyle.Render(w.selectedVersion())))
+			content = append(content, row(LabelStyle.Render("3. Version:"), ValueHighlightStyle.Render(versionDisplay(engine, w.selectedVersion()))))
 		}
 	}
 
@@ -915,7 +1005,7 @@ func (m *AppModel) buildWizardBodyRows(inner, inputWidth int) string {
 	dbLabel := "6. Database:"
 	passLabel := "7. Password:"
 	memLabel := "8. Memory:"
-	if w.isPostgres() && w.maxReached >= StepVersion {
+	if w.maxReached >= StepVersion {
 		nameLabel = "4. Name:"
 		containerLabel = "5. Container:"
 		portLabel = "6. Port:"
@@ -945,7 +1035,11 @@ func (m *AppModel) buildWizardBodyRows(inner, inputWidth int) string {
 	if w.maxReached >= StepMemoryLimit {
 		recommendation := "(Recommended: 512M - 1G)"
 		if w.engines[w.selectedEngineIdx] == "sqlserver" {
-			recommendation = "(Recommended: 2G min for MSSQL)"
+			if w.selectedVersion() == core.SQLServerAzureEdge {
+				recommendation = "(Recommended: 512M - 1G)"
+			} else {
+				recommendation = "(Recommended: 2G min for MSSQL)"
+			}
 		}
 		content = append(content, m.wizardValueRow(inner, memLabel, truncateEnd(w.inputs[5].Value(), inputWidth), 5, recommendation))
 	}

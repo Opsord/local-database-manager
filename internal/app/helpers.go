@@ -6,6 +6,7 @@ import (
 
 	"local-database-manager/internal/core"
 
+	bubbleskey "github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -94,6 +95,22 @@ func styleTextInput(ti textinput.Model) textinput.Model {
 	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(MutedColor).Background(BgSurface)
 	ti.Cursor.Style = lipgloss.NewStyle().Foreground(PrimaryColor).Background(BgSurface)
 	ti.Cursor.TextStyle = surface
+
+	ti.KeyMap.DeleteWordBackward = bubbleskey.NewBinding(
+		bubbleskey.WithKeys("alt+backspace", "ctrl+w", "ctrl+backspace", "ctrl+h"),
+	)
+	ti.KeyMap.DeleteCharacterBackward = bubbleskey.NewBinding(
+		bubbleskey.WithKeys("backspace"),
+	)
+	ti.KeyMap.DeleteWordForward = bubbleskey.NewBinding(
+		bubbleskey.WithKeys("alt+delete", "alt+d", "ctrl+delete"),
+	)
+	ti.KeyMap.WordBackward = bubbleskey.NewBinding(
+		bubbleskey.WithKeys("alt+left", "alt+b", "ctrl+left"),
+	)
+	ti.KeyMap.WordForward = bubbleskey.NewBinding(
+		bubbleskey.WithKeys("alt+right", "alt+f", "ctrl+right"),
+	)
 	return ti
 }
 
@@ -208,6 +225,14 @@ func plainDetailFields(inst *core.DatabaseInstance, panelWidth int) []plainDetai
 	}
 	if inst.EngineType == "postgres" {
 		fields = append(fields, plainDetailField{"Version:", inst.Version})
+	} else if inst.EngineType == "sqlserver" && inst.Version != "" {
+		verDisplay := inst.Version
+		if inst.Version == core.SQLServerAzureEdge {
+			verDisplay = "Azure SQL Edge"
+		} else if inst.Version == core.SQLServer2022 {
+			verDisplay = "2022"
+		}
+		fields = append(fields, plainDetailField{"Version:", verDisplay})
 	}
 	fields = append(fields, []plainDetailField{
 		{"Container:", truncateEnd(inst.ContainerName, panelWidth-20)},

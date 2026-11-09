@@ -46,6 +46,10 @@ local-database-manager/
 │   └── db-manager/
 │       └── main.go                  # CLI entrypoint and project root detection
 │
+├── scripts/                         # Setup and automation helper scripts
+│   ├── setup-alias.ps1              # Windows PowerShell shortcut setup script
+│   └── setup-alias.sh               # Bash/Zsh shortcut setup script
+│
 ├── internal/
 │   ├── core/                        # Domain logic (instance model, parser, ports, runner)
 │   └── app/                         # Bubble Tea UI presentation layer
@@ -101,28 +105,78 @@ go build -o db-manager.exe ./cmd/db-manager
 
 ## Terminal Shortcut Setup (`dbm`)
 
-To run `dbm` from any folder in PowerShell:
+To run `dbm` from any folder across your terminal sessions:
 
-1. Open PowerShell and run:
+### Option A: Automatic Setup (Recommended)
+
+Run the included setup script. It automatically detects the repository location (wherever you cloned it), compiles the binary if missing, creates your shell profile directory safely if it doesn't exist, and avoids duplicate definitions if run again:
+
+**PowerShell (Windows):**
 ```powershell
-$functionCode = @"
+.\scripts\setup-alias.ps1
+```
+> [!TIP]
+> - **Running from another location:** Pass `-RepoPath "path\to\local-database-manager"`.
+> - **Targeting another profile:** Pass `-TargetProfile $PROFILE.CurrentUserAllHosts` (e.g. to share across Windows PowerShell and PowerShell 7) or specify an explicit `.ps1` file.
+> - If PowerShell displays an execution policy error, run once: `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser`.
 
+**Bash / Zsh (Linux, macOS, Git Bash):**
+```bash
+chmod +x ./scripts/setup-alias.sh
+./scripts/setup-alias.sh
+```
+
+---
+
+### Option B: Manual Setup (PowerShell)
+
+If you prefer to configure your PowerShell profile manually:
+
+1. Compile the binary first (if not done yet):
+```powershell
+go build -o db-manager.exe ./cmd/db-manager
+```
+
+2. Open PowerShell and run:
+```powershell
+# Dynamically resolves the repo directory (or specify: $repoPath = "C:\path\to\local-database-manager")
+$repoPath = (Get-Location).Path
+
+$markerStart = "# >>> local-database-manager (dbm) >>>"
+$markerEnd   = "# <<< local-database-manager (dbm) <<<"
+
+$functionCode = @"
+$markerStart
 function dbm {
-    Push-Location "C:\Users\andre\Programacion\Personal\local-database-manager"
+    Push-Location "$repoPath"
     try {
         .\db-manager.exe `$args
     } finally {
         Pop-Location
     }
 }
+$markerEnd
 "@
 
-if (!(Test-Path $PROFILE)) { New-Item -ItemType File -Path $PROFILE -Force }
-Add-Content -Path $PROFILE -Value $functionCode
+# Ensure profile directory and file exist
+$profileDir = Split-Path -Parent $PROFILE
+if (!(Test-Path $profileDir)) { New-Item -ItemType Directory -Path $profileDir -Force | Out-Null }
+if (!(Test-Path $PROFILE)) { New-Item -ItemType File -Path $PROFILE -Force | Out-Null }
+
+# Idempotently update or append
+$content = Get-Content -Path $PROFILE -Raw -ErrorAction SilentlyContinue
+$pattern = "(?s)" + [regex]::Escape($markerStart) + ".*?" + [regex]::Escape($markerEnd)
+if ($content -and ($content -match $pattern)) {
+    $content = $content -replace $pattern, $functionCode
+    Set-Content -Path $PROFILE -Value $content -NoNewline
+} else {
+    Add-Content -Path $PROFILE -Value "`r`n$functionCode"
+}
+
 . $PROFILE
 ```
 
-2. Simply type `dbm` anywhere in your terminal:
+3. Type `dbm` anywhere in your terminal:
 ```powershell
 dbm
 ```

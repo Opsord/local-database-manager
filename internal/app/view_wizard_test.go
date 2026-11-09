@@ -153,7 +153,7 @@ func TestWizardSaveWritesPostgresVersionAndVolume(t *testing.T) {
 	}
 }
 
-func TestWizardSkipsVersionForSQLServer(t *testing.T) {
+func TestWizardSQLServerRuntimeGoesToVersion(t *testing.T) {
 	t.Parallel()
 	w := newWizardModel("/tmp", "/tmp", nil)
 	w.step = StepRuntime
@@ -161,8 +161,8 @@ func TestWizardSkipsVersionForSQLServer(t *testing.T) {
 	if !w.confirmAdvance() {
 		t.Fatal("runtime confirm")
 	}
-	if w.step != StepName {
-		t.Fatalf("sqlserver should skip Version, got step %v", w.step)
+	if w.step != StepVersion {
+		t.Fatalf("sqlserver should go to Version, got step %v", w.step)
 	}
 }
 
@@ -341,8 +341,8 @@ func TestWizardBackAndEmptyBackspace(t *testing.T) {
 	m.wizard.maxReached = StepName
 	m.wizard.setFocus(StepName)
 	_, _ = m.updateWizard(tea.KeyMsg{Type: tea.KeyBackspace})
-	if m.wizard.step != StepVersion {
-		t.Fatalf("empty backspace -> Version, got %v", m.wizard.step)
+	if m.wizard.step != StepName {
+		t.Fatalf("empty backspace must stay on StepName, got %v", m.wizard.step)
 	}
 }
 
@@ -549,7 +549,7 @@ func TestWizardBodyLineForStepMatchesRenderedRows(t *testing.T) {
 		}
 	})
 
-	t.Run("sqlserver skips version row", func(t *testing.T) {
+	t.Run("sqlserver includes version row", func(t *testing.T) {
 		t.Parallel()
 		w := newWizardModel("/tmp", "/tmp/instances", nil)
 		w.maxReached = StepReview
@@ -557,8 +557,8 @@ func TestWizardBodyLineForStepMatchesRenderedRows(t *testing.T) {
 
 		runtimeLine := w.bodyLineForStep(StepRuntime)
 		nameLine := w.bodyLineForStep(StepName)
-		if got := nameLine - runtimeLine; got != 1 {
-			t.Fatalf("name line %d - runtime line %d = %d, want 1 (version step not rendered)", nameLine, runtimeLine, got)
+		if got := nameLine - runtimeLine; got != 2 {
+			t.Fatalf("name line %d - runtime line %d = %d, want 2 (version step rendered)", nameLine, runtimeLine, got)
 		}
 	})
 }
@@ -1259,5 +1259,236 @@ func TestEditWizardShowsRuntimeLockedPreview(t *testing.T) {
 	}
 	if !strings.Contains(plain, "Podman") && !strings.Contains(plain, "podman") {
 		t.Fatalf("expected Podman label, got %q", plain)
+	}
+}
+
+func TestWizardVolumeRowFillsSurface(t *testing.T) {
+	// SetColorProfile is process-global; do not run in parallel.
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	m := reviewModel(120, 32)
+	row := m.wizardPreviewRow(60, "Volume:", "pgdata_shop_16")
+	unpainted := cellsWithoutBG(row)
+	if unpainted != 0 {
+		t.Fatalf("wizard volume preview row has %d unpainted cells, want 0", unpainted)
+	}
+
+	lockedRow := m.wizardPreviewRow(60, "2. Runtime:", "Docker (locked)")
+	unpaintedLocked := cellsWithoutBG(lockedRow)
+	if unpaintedLocked != 0 {
+		t.Fatalf("wizard locked runtime preview row has %d unpainted cells, want 0", unpaintedLocked)
+	}
+}
+
+func TestWizardMemoryRowFillsSurface(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	m := reviewModel(120, 32)
+	m.wizard.step = StepMemoryLimit
+	m.wizard.inputs[5].Focus()
+	inner := screenInnerWidth(m.width)
+	_, rightWidth, _ := splitPanelWidths(inner)
+	rightInner := panelInnerWidth(rightWidth)
+	contentHeight := mainContentHeight(m.height)
+	_, dockHeight := splitPanelHalfHeight(contentHeight - 1)
+
+	_ = m.viewWizardDock(rightInner, dockHeight)
+	vp := m.wizard.scrollViewport.View()
+	for i, l := range strings.Split(vp, "\n") {
+		unp := cellsWithoutBG(l)
+		if unp > 0 {
+			t.Fatalf("wizard viewport line %d has %d unpainted cells: %q", i, unp, l)
+		}
+	}
+}
+
+func TestWizardHoldingBackspaceDoesNotChangeStep(t *testing.T) {
+	t.Parallel()
+	w := newWizardModel("/tmp", "/tmp/instances", nil)
+	w.inputs[0].SetValue("my_instance")
+	w.inputs[1].SetValue("pg-my-instance")
+	w.inputs[2].SetValue("5432")
+	w.maxReached = StepPort
+	w.setFocus(StepPort)
+	m := &AppModel{mode: ModeWizard, wizard: w}
+
+	if m.wizard.step != StepPort {
+		t.Fatalf("expected StepPort, got %v", m.wizard.step)
+	}
+
+	// Send 10 backspace events (simulating holding down the delete button)
+	for i := 0; i < 10; i++ {
+		_, _ = m.updateWizard(tea.KeyMsg{Type: tea.KeyBackspace})
+	}
+
+	if m.wizard.step != StepPort {
+		t.Fatalf("step changed after multiple backspaces! got %v, want %v", m.wizard.step, StepPort)
+	}
+	if m.wizard.inputs[2].Value() != "" {
+		t.Fatalf("port value should be empty, got %q", m.wizard.inputs[2].Value())
+	}
+	if m.wizard.inputs[0].Value() != "my_instance" {
+		t.Fatalf("higher field Name was erased! got %q, want 'my_instance'", m.wizard.inputs[0].Value())
+	}
+	if m.wizard.inputs[1].Value() != "pg-my-instance" {
+		t.Fatalf("higher field Container was erased! got %q, want 'pg-my-instance'", m.wizard.inputs[1].Value())
+	}
+}
+
+func TestWizardTextInputShortcuts(t *testing.T) {
+	t.Parallel()
+	w := newWizardModel("/tmp", "/tmp/instances", nil)
+	w.maxReached = StepName
+	w.setFocus(StepName)
+	m := &AppModel{mode: ModeWizard, wizard: w}
+
+	// 1. Delete word backward with ctrl+w
+	m.wizard.inputs[0].SetValue("hello world")
+	m.wizard.inputs[0].SetCursor(len("hello world"))
+	_, _ = m.updateWizard(tea.KeyMsg{Type: tea.KeyCtrlW})
+	if m.wizard.inputs[0].Value() != "hello " {
+		t.Fatalf("ctrl+w: got %q, want 'hello '", m.wizard.inputs[0].Value())
+	}
+
+	// 2. Delete word backward with ctrl+h
+	m.wizard.inputs[0].SetValue("foo bar")
+	m.wizard.inputs[0].SetCursor(len("foo bar"))
+	_, _ = m.updateWizard(tea.KeyMsg{Type: tea.KeyCtrlH})
+	if m.wizard.inputs[0].Value() != "foo " {
+		t.Fatalf("ctrl+h: got %q, want 'foo '", m.wizard.inputs[0].Value())
+	}
+
+	// 3. Delete word forward with ctrl+delete / alt+delete
+	m.wizard.inputs[0].SetValue("first second")
+	m.wizard.inputs[0].SetCursor(0)
+	_, _ = m.updateWizard(key("alt+delete"))
+	if m.wizard.inputs[0].Value() != " second" {
+		t.Fatalf("alt+delete: got %q, want ' second'", m.wizard.inputs[0].Value())
+	}
+
+	// 4. Ctrl+C copies non-empty value to clipboard without closing wizard
+	m.wizard.inputs[0].SetValue("copy_me")
+	m.wizard.inputs[0].SetCursor(len("copy_me"))
+	_, _ = m.updateWizard(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if m.mode != ModeWizard {
+		t.Fatalf("mode should remain ModeWizard after Ctrl+C on text, got %v", m.mode)
+	}
+	if !strings.Contains(m.statusMsg, "Copied 'copy_me' to clipboard") {
+		t.Fatalf("expected copy status message, got %q", m.statusMsg)
+	}
+
+	// 5. Ctrl+C on empty field cancels wizard
+	m.wizard.inputs[0].SetValue("")
+	_, _ = m.updateWizard(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if m.mode != ModeMain {
+		t.Fatalf("Ctrl+C on empty field should cancel wizard, got mode %v", m.mode)
+	}
+
+	// 6. Esc always cancels wizard
+	m.mode = ModeWizard
+	m.wizard.inputs[0].SetValue("something")
+	_, _ = m.updateWizard(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.mode != ModeMain {
+		t.Fatalf("Esc should cancel wizard, got mode %v", m.mode)
+	}
+}
+
+func TestWizardSQLServerVersionSelection(t *testing.T) {
+	t.Parallel()
+	m := &AppModel{
+		width:  100,
+		height: 30,
+		mode:   ModeWizard,
+		wizard: newWizardModel("/tmp", "/tmp/instances", nil),
+	}
+	// switch to SQL Server
+	m.wizard.selectedEngineIdx = 1
+	m.wizard.applyEngineDefaults("postgres", "sqlserver")
+	m.wizard.step = StepVersion
+	m.wizard.maxReached = StepReview
+
+	// Default SQL Server version should be 2022
+	if m.wizard.selectedVersion() != core.SQLServer2022 {
+		t.Fatalf("initial version = %q, want %q", m.wizard.selectedVersion(), core.SQLServer2022)
+	}
+
+	// Verify guidance note for 2022
+	body2022 := stripANSI(m.buildWizardBodyRows(80, 20))
+	if !strings.Contains(body2022, "Full SQL Server 2022") || !strings.Contains(body2022, "Rosetta 2") {
+		t.Fatalf("expected 2022 guidance note, got:\n%s", body2022)
+	}
+
+	// Cycle right to Azure SQL Edge
+	m.wizard.cycleOption(1)
+	if m.wizard.selectedVersion() != core.SQLServerAzureEdge {
+		t.Fatalf("after cycle right version = %q, want %q", m.wizard.selectedVersion(), core.SQLServerAzureEdge)
+	}
+	if m.wizard.inputs[5].Value() != "1G" {
+		t.Fatalf("memory after selecting azure-edge = %q, want 1G", m.wizard.inputs[5].Value())
+	}
+
+	// Verify warning note for Azure SQL Edge
+	bodyEdge := stripANSI(m.buildWizardBodyRows(80, 20))
+	if !strings.Contains(bodyEdge, "Retired/frozen on ARM64") || !strings.Contains(bodyEdge, "No SQL Agent") {
+		t.Fatalf("expected Azure SQL Edge warning note, got:\n%s", bodyEdge)
+	}
+
+	// Cycle left back to 2022
+	m.wizard.cycleOption(-1)
+	if m.wizard.selectedVersion() != core.SQLServer2022 {
+		t.Fatalf("after cycle left version = %q, want %q", m.wizard.selectedVersion(), core.SQLServer2022)
+	}
+	if m.wizard.inputs[5].Value() != "2G" {
+		t.Fatalf("memory after selecting 2022 = %q, want 2G", m.wizard.inputs[5].Value())
+	}
+}
+
+func TestWizardSQLServerSaveWritesImageAndVersion(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	w := newWizardModel("/tmp", tmpDir, nil)
+	w.selectedEngineIdx = 1 // sqlserver
+	w.selectedVersionIdx = 1 // azure-edge
+	w.inputs[0].SetValue("my-edge-app")
+	w.inputs[1].SetValue("sql-my_edge_app")
+	w.inputs[2].SetValue("1433")
+	w.inputs[3].SetValue("edge_db")
+	w.inputs[4].SetValue("SuperSecure123!")
+	w.inputs[5].SetValue("1G")
+
+	if err := w.saveInstance(); err != nil {
+		t.Fatalf("saveInstance error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(tmpDir, "my_edge_app.env"))
+	if err != nil {
+		t.Fatalf("ReadFile error: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, "SQLSERVER_VERSION=azure-edge") {
+		t.Fatalf("missing SQLSERVER_VERSION=azure-edge in:\n%s", s)
+	}
+	if !strings.Contains(s, "SQLSERVER_IMAGE=mcr.microsoft.com/azure-sql-edge:latest") {
+		t.Fatalf("missing SQLSERVER_IMAGE in:\n%s", s)
+	}
+	if !strings.Contains(s, "MEMORY_LIMIT=1G") {
+		t.Fatalf("missing MEMORY_LIMIT=1G in:\n%s", s)
+	}
+}
+
+func TestEditWizardPreloadsSQLServerVersion(t *testing.T) {
+	t.Parallel()
+	inst := &core.DatabaseInstance{
+		Name:          "edgeapp",
+		EngineType:    "sqlserver",
+		Runtime:       "docker",
+		Version:       core.SQLServerAzureEdge,
+		EnvFilePath:   "/tmp/edgeapp.env",
+		ContainerName: "sql-edgeapp",
+		Port:          1433,
+		Database:      "edge_db",
+		MemoryLimit:   "1G",
+	}
+	w := newEditWizardModel("/tmp", "/tmp", nil, inst)
+	if w.selectedVersion() != core.SQLServerAzureEdge {
+		t.Fatalf("selectedVersion = %q, want %q", w.selectedVersion(), core.SQLServerAzureEdge)
 	}
 }

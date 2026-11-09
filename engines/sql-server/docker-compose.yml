@@ -1,7 +1,7 @@
 services:
   database:
     container_name: ${CONTAINER_NAME}
-    image: mcr.microsoft.com/mssql/server:2022-latest
+    image: ${SQLSERVER_IMAGE:-mcr.microsoft.com/mssql/server:2022-latest}
     restart: unless-stopped
     mem_limit: ${MEMORY_LIMIT:-2048m}
     environment:

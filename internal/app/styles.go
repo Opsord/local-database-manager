@@ -103,6 +103,10 @@ var (
 			Foreground(WarningColor).
 			Background(BgSurface)
 
+	WarningStyle = lipgloss.NewStyle().
+			Foreground(WarningColor).
+			Background(BgSurface)
+
 	MutedStyle = lipgloss.NewStyle().
 			Foreground(MutedColor).
 			Background(BgSurface)
