@@ -19,7 +19,7 @@ func TestEngineDockFillsSurface(t *testing.T) {
 	m.mode = ModeEngineMenu
 	m.dockerHealth = core.EngineOffline
 	m.podmanHealth = core.EngineOffline
-	m.engineMenuIndex = 1 // Podman selected â€” Docker row must still fill width
+	m.engineMenuIndex = 1 // Podman selected — Docker row must still fill width
 
 	dock := cellsWithoutBG(m.viewEngineDock(50, 8))
 	full := cellsWithoutBG(m.View())

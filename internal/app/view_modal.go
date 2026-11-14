@@ -185,7 +185,7 @@ func (m *AppModel) viewActionDock(innerWidth, dockHeight int) string {
 
 	items := m.getActionMenuItems(inst)
 	title := surfaceLine(innerWidth, TitleStyle.Render(fmt.Sprintf("Actions: %s (%s)", inst.Name, inst.EngineType)))
-	hints := surfaceLine(innerWidth, MutedStyle.Render("Use [â†‘/â†“] to navigate, [Enter] to execute, [Esc] to return."))
+	hints := surfaceLine(innerWidth, MutedStyle.Render("Use [↑/↓] to navigate, [Enter] to execute, [Esc] to return."))
 
 	bodyHeight := dockHeight - 2
 	if bodyHeight < 1 {
@@ -207,7 +207,7 @@ func (m *AppModel) viewActionDock(innerWidth, dockHeight int) string {
 			prefix = "> "
 		}
 		label := lipgloss.NewStyle().Bold(true).Foreground(FgText).Background(bg).Render(prefix + item.label)
-		desc := lipgloss.NewStyle().Foreground(MutedColor).Background(bg).Render("â€” " + item.description)
+		desc := lipgloss.NewStyle().Foreground(MutedColor).Background(bg).Render("— " + item.description)
 		parts := []string{label}
 		if item.shortcut != "" {
 			badge := lipgloss.NewStyle().Foreground(AccentColor).Background(bg).Render(fmt.Sprintf("[%s]", item.shortcut))
@@ -258,11 +258,11 @@ func (m *AppModel) viewHelp() string {
 
 	var content []string
 	content = append(content, TitleStyle.Render("Keyboard Shortcuts & Guide"))
-	content = append(content, SeparatorStyle.Render(strings.Repeat("â”€", modalWidth-4)))
+	content = append(content, SeparatorStyle.Render(strings.Repeat("─", modalWidth-4)))
 	content = append(content, surfaceGap(1))
 
 	helpItems := [][]string{
-		{"[â†‘ / â†“] / [k / j]", "Navigate through database instances"},
+		{"[↑ / ↓] / [k / j]", "Navigate through database instances"},
 		{"[Enter]", "Dock Action Menu in bottom-right panel (Start/Stop, Copy URI, Logs, Edit Instance, Purge, Delete Instance)"},
 		{"[Edit Instance]", "Docked wizard (from Action Menu); [o] opens external editor"},
 		{"[y / n]", "Confirm restart after saving edits to a running instance"},
@@ -273,7 +273,7 @@ func (m *AppModel) viewHelp() string {
 		{"[E / x]", "Copy backend .env configuration block to clipboard"},
 		{"[l]", "Open live log streamer for selected container"},
 		{"[n]", "Create new database instance with step-by-step wizard"},
-		{"[e]", "Dock Engines panel (left) â€” Start offline; Stop online (y/n confirm)"},
+		{"[e]", "Dock Engines panel (left) — Start offline; Stop online (y/n confirm)"},
 		{"[d]", "Purge instance container and wipe persistent volume (down -v); keeps the .env definition"},
 		{"[D]", "Delete instance: purge container+volume and remove the .env from the list"},
 		{"[r]", "Reload instances & recheck Docker / Podman daemon health"},
@@ -289,8 +289,8 @@ func (m *AppModel) viewHelp() string {
 
 	content = append(content, surfaceGap(1))
 	content = append(content, SubTitleStyle.Render("Database Drivers & Tools:"))
-	content = append(content, MutedStyle.Render("  â€¢ Postgres: psql, pgAdmin, DBeaver, Prisma, TypeORM, GORM"))
-	content = append(content, MutedStyle.Render("  â€¢ SQL Server: sqlcmd, SSMS, Azure Data Studio, EF Core"))
+	content = append(content, MutedStyle.Render("  • Postgres: psql, pgAdmin, DBeaver, Prisma, TypeORM, GORM"))
+	content = append(content, MutedStyle.Render("  • SQL Server: sqlcmd, SSMS, Azure Data Studio, EF Core"))
 	content = append(content, surfaceGap(1))
 	content = append(content, MutedStyle.Render("Press [Esc], [?], or [Enter] to return."))
 

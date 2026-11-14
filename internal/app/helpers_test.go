@@ -44,10 +44,10 @@ func TestMainSplitDoesNotWrap(t *testing.T) {
 	}
 
 	first := strings.Split(split, "\n")[0]
-	if !strings.Contains(first, "â”Œ") || !strings.Contains(first, "â”") {
+	if !strings.Contains(first, "┌") || !strings.Contains(first, "┐") {
 		t.Fatalf("top border missing square corners: %q", first)
 	}
-	if strings.Contains(first, "â•­") || strings.Contains(first, "â•®") {
+	if strings.Contains(first, "╭") || strings.Contains(first, "╮") {
 		t.Fatalf("top border still uses rounded corners: %q", first)
 	}
 }
@@ -162,7 +162,7 @@ func TestStyleTextInputSetsSurfaceBackground(t *testing.T) {
 	// Inspect the input's own view (not wrapInputField): the wrapper already
 	// emits BgSurface, then inner SGR resets punch holes through it.
 	view := ti.View()
-	// BgSurface #0b253a â†’ 11;37;58 (Lip Gloss may round to 11;36;58)
+	// BgSurface #0b253a → 11;37;58 (Lip Gloss may round to 11;36;58)
 	if !strings.Contains(view, "48;2;11;37;58") && !strings.Contains(view, "48;2;11;36;58") {
 		t.Fatalf("input view missing BgSurface: %q", view)
 	}

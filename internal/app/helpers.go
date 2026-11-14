@@ -53,26 +53,26 @@ func truncateEnd(s string, max int) string {
 func statusIcon(status core.ContainerStatus) string {
 	switch status {
 	case core.StatusReady:
-		return RunningStyle.Render("â—")
+		return RunningStyle.Render("●")
 	case core.StatusStarting:
-		return StartingStyle.Render("â—")
+		return StartingStyle.Render("◐")
 	case core.StatusUnknown:
 		return UnknownStyle.Render("?")
 	default:
-		return StoppedStyle.Render("â—‹")
+		return StoppedStyle.Render("○")
 	}
 }
 
 func statusLabel(status core.ContainerStatus) string {
 	switch status {
 	case core.StatusReady:
-		return RunningStyle.Render("â— RUNNING")
+		return RunningStyle.Render("● RUNNING")
 	case core.StatusStarting:
-		return StartingStyle.Render("â— STARTING")
+		return StartingStyle.Render("◐ STARTING")
 	case core.StatusUnknown:
 		return UnknownStyle.Render("? UNKNOWN")
 	default:
-		return StoppedStyle.Render("â—‹ STOPPED")
+		return StoppedStyle.Render("○ STOPPED")
 	}
 }
 
@@ -182,7 +182,7 @@ func panelSeparator(width int) string {
 	if width < 1 {
 		width = 1
 	}
-	return SeparatorStyle.Width(width).Render(strings.Repeat("â”€", width))
+	return SeparatorStyle.Width(width).Render(strings.Repeat("─", width))
 }
 
 func surfaceBlankLine(width int) string {
@@ -396,13 +396,13 @@ func formatShortcutBar(width int, shortcuts []string) string {
 func statusIconPlain(status core.ContainerStatus) string {
 	switch status {
 	case core.StatusReady:
-		return "â—"
+		return "●"
 	case core.StatusStarting:
-		return "â—"
+		return "◐"
 	case core.StatusUnknown:
 		return "?"
 	default:
-		return "â—‹"
+		return "○"
 	}
 }
 

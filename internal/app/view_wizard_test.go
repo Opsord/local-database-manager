@@ -409,7 +409,7 @@ func TestWizardReviewFitsTerminal(t *testing.T) {
 			}
 		}
 		plain := stripANSI(view)
-		if strings.Contains(plain, "\noverflow") || strings.Contains(plain, "â”‚ overflow") {
+		if strings.Contains(plain, "\noverflow") || strings.Contains(plain, "│ overflow") {
 			t.Fatalf("long container name wrapped out of its row:\n%s", plain)
 		}
 	}
@@ -432,7 +432,7 @@ func TestWizardReviewShowsPasswordAndHidesIdlePrompts(t *testing.T) {
 	if !strings.Contains(plain, "s3cretPass") {
 		t.Fatalf("password missing from review:\n%s", plain)
 	}
-	if strings.Contains(plain, "â€¢") {
+	if strings.Contains(plain, "•") {
 		t.Fatalf("password still masked:\n%s", plain)
 	}
 	// One ">" comes from the selected row in the instance list, not wizard inputs.
@@ -446,7 +446,7 @@ func TestWizardFooterShowsNavHints(t *testing.T) {
 	m := &AppModel{width: 120, height: 32, mode: ModeWizard}
 	m.wizard = newWizardModel("/tmp", "/tmp/instances", nil)
 	plain := stripANSI(m.viewWizard())
-	if !strings.Contains(plain, "[â†‘â†“] rows") || !strings.Contains(plain, "[â†â†’] options") ||
+	if !strings.Contains(plain, "[↑↓] rows") || !strings.Contains(plain, "[←→] options") ||
 		!strings.Contains(plain, "[Esc] cancel") {
 		t.Fatalf("footer missing nav hints:\n%s", plain)
 	}
