@@ -6,6 +6,7 @@ import (
 
 	"local-database-manager/internal/core"
 
+	bubbleskey "github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -19,7 +20,14 @@ func (m *AppModel) wrapScreen(content string) string {
 }
 
 func (m *AppModel) renderOverlay(modal string) string {
-	return lipgloss.Place(m.width-2, m.height, lipgloss.Center, lipgloss.Center, modal)
+	return lipgloss.Place(
+		m.width-2,
+		m.height,
+		lipgloss.Center,
+		lipgloss.Center,
+		modal,
+		lipgloss.WithWhitespaceBackground(BgDark),
+	)
 }
 
 func truncateMiddle(s string, max int) string {
@@ -80,10 +88,29 @@ func engineBadge(name string, health core.EngineHealth) string {
 }
 
 func styleTextInput(ti textinput.Model) textinput.Model {
-	ti.PromptStyle = lipgloss.NewStyle().Foreground(AccentColor)
-	ti.TextStyle = lipgloss.NewStyle().Foreground(FgText)
-	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(MutedColor)
-	ti.Cursor.Style = lipgloss.NewStyle().Foreground(PrimaryColor)
+	surface := lipgloss.NewStyle().Foreground(FgText).Background(BgSurface)
+	ti.Prompt = ""
+	ti.PromptStyle = lipgloss.NewStyle().Foreground(AccentColor).Background(BgSurface)
+	ti.TextStyle = surface
+	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(MutedColor).Background(BgSurface)
+	ti.Cursor.Style = lipgloss.NewStyle().Foreground(PrimaryColor).Background(BgSurface)
+	ti.Cursor.TextStyle = surface
+
+	ti.KeyMap.DeleteWordBackward = bubbleskey.NewBinding(
+		bubbleskey.WithKeys("alt+backspace", "ctrl+w", "ctrl+backspace", "ctrl+h"),
+	)
+	ti.KeyMap.DeleteCharacterBackward = bubbleskey.NewBinding(
+		bubbleskey.WithKeys("backspace"),
+	)
+	ti.KeyMap.DeleteWordForward = bubbleskey.NewBinding(
+		bubbleskey.WithKeys("alt+delete", "alt+d", "ctrl+delete"),
+	)
+	ti.KeyMap.WordBackward = bubbleskey.NewBinding(
+		bubbleskey.WithKeys("alt+left", "alt+b", "ctrl+left"),
+	)
+	ti.KeyMap.WordForward = bubbleskey.NewBinding(
+		bubbleskey.WithKeys("alt+right", "alt+f", "ctrl+right"),
+	)
 	return ti
 }
 
@@ -151,6 +178,13 @@ func panelTitle(text string, width int) string {
 	return TitleStyle.Width(width).Render(text)
 }
 
+func panelSeparator(width int) string {
+	if width < 1 {
+		width = 1
+	}
+	return SeparatorStyle.Width(width).Render(strings.Repeat("─", width))
+}
+
 func surfaceBlankLine(width int) string {
 	return surfaceLine(width, " ")
 }
@@ -159,31 +193,154 @@ func detailField(label, value string) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, LabelStyle.Render(label), surfaceGap(1), value)
 }
 
-func renderDetailRows(inst *core.DatabaseInstance, panelWidth int) []string {
+type plainDetailField struct {
+	Label, Value string
+}
+
+func statusPlainText(status core.ContainerStatus) string {
+	switch status {
+	case core.StatusReady:
+		return "RUNNING"
+	case core.StatusStarting:
+		return "STARTING"
+	case core.StatusUnknown:
+		return "UNKNOWN"
+	default:
+		return "STOPPED"
+	}
+}
+
+// statusDisplayPlain matches statusLabel layout (icon + space + word) without ANSI,
+// so double-click hit boxes align with the visible status token.
+func statusDisplayPlain(status core.ContainerStatus) string {
+	return statusIconPlain(status) + " " + statusPlainText(status)
+}
+
+func plainDetailFields(inst *core.DatabaseInstance, panelWidth int) []plainDetailField {
 	engineDesc := fmt.Sprintf("%s (%s)", strings.ToUpper(inst.EngineType), strings.ToUpper(inst.Runtime))
 	memFormatted := fmt.Sprintf("%s (Limit: %s)", inst.MemoryUsage, inst.MemoryLimit)
-	statusFormatted := statusLabel(inst.Status)
 
-	fields := []struct {
-		label string
-		value string
-	}{
-		{"Engine:", ValueHighlightStyle.Render(engineDesc)},
-		{"Container:", ValueStyle.Render(truncateEnd(inst.ContainerName, panelWidth-20))},
-		{"Status:", statusFormatted},
-		{"Memory:", ValueStyle.Render(memFormatted)},
-		{"Database:", ValueStyle.Render(inst.Database)},
-		{"Port:", ValueHighlightStyle.Render(fmt.Sprintf("%d", inst.Port))},
-		{"User:", ValueStyle.Render(inst.User)},
-		{"Schema:", ValueStyle.Render(inst.Schema)},
-		{"Volume:", ValueStyle.Render(truncateEnd(inst.Volume, panelWidth-20))},
-		{"Project:", ValueStyle.Render(truncateEnd(inst.ProjectName, panelWidth-20))},
+	fields := []plainDetailField{
+		{"Engine:", engineDesc},
 	}
+	if inst.EngineType == "postgres" {
+		fields = append(fields, plainDetailField{"Version:", inst.Version})
+	} else if inst.EngineType == "sqlserver" && inst.Version != "" {
+		verDisplay := inst.Version
+		if inst.Version == core.SQLServerAzureEdge {
+			verDisplay = "Azure SQL Edge"
+		} else if inst.Version == core.SQLServer2022 {
+			verDisplay = "2022"
+		}
+		fields = append(fields, plainDetailField{"Version:", verDisplay})
+	}
+	fields = append(fields, []plainDetailField{
+		{"Container:", truncateEnd(inst.ContainerName, panelWidth-20)},
+		{"Status:", statusDisplayPlain(inst.Status)},
+		{"Memory:", memFormatted},
+		{"Database:", inst.Database},
+		{"Port:", fmt.Sprintf("%d", inst.Port)},
+		{"User:", inst.User},
+		{"Schema:", inst.Schema},
+		{"Volume:", truncateEnd(inst.Volume, panelWidth-20)},
+		{"Project:", truncateEnd(inst.ProjectName, panelWidth-20)},
+	}...)
+	return fields
+}
+
+func styledDetailValue(label string, plainValue string, inst *core.DatabaseInstance) string {
+	switch label {
+	case "Engine:", "Port:":
+		return ValueHighlightStyle.Render(plainValue)
+	case "Status:":
+		return statusLabel(inst.Status)
+	default:
+		return ValueStyle.Render(plainValue)
+	}
+}
+
+func styleValueWithCopiedHit(plain string, valueOriginX, rowY int, base lipgloss.Style, copied *copyHit) string {
+	if plain == "" {
+		return base.Render(plain)
+	}
+	var parts []string
+	pos := 0
+	for _, tok := range tokenizeValue(plain) {
+		if tok.Start > pos {
+			parts = append(parts, base.Render(plain[pos:tok.Start]))
+		}
+		prov := copyHit{
+			X:    valueOriginX + displayWidth(plain[:tok.Start]),
+			Y:    rowY,
+			W:    displayWidth(tok.Text),
+			H:    1,
+			Text: tok.Text,
+		}
+		if copied != nil && hitsEqual(*copied, prov) {
+			parts = append(parts, CopiedTokenStyle.Render(tok.Text))
+		} else {
+			parts = append(parts, base.Render(tok.Text))
+		}
+		pos = tok.End
+	}
+	if pos < len(plain) {
+		parts = append(parts, base.Render(plain[pos:]))
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+}
+
+func statusValueStyle(status core.ContainerStatus) lipgloss.Style {
+	switch status {
+	case core.StatusReady:
+		return RunningStyle
+	case core.StatusStarting:
+		return StartingStyle
+	case core.StatusUnknown:
+		return UnknownStyle
+	default:
+		return StoppedStyle
+	}
+}
+
+func styleStatusWithCopiedHit(status core.ContainerStatus, valueOriginX, rowY int, copied *copyHit) string {
+	s := statusValueStyle(status)
+	icon := statusIconPlain(status)
+	iconPart := s.Render(icon)
+	spacePart := lipgloss.NewStyle().Background(BgSurface).Render(" ")
+	wordPlain := statusPlainText(status)
+	wordOriginX := valueOriginX + displayWidth(icon+" ")
+	wordPart := styleValueWithCopiedHit(wordPlain, wordOriginX, rowY, s, copied)
+	return lipgloss.JoinHorizontal(lipgloss.Top, iconPart, spacePart, wordPart)
+}
+
+func styledDetailValueWithCopiedHit(label, plainValue string, inst *core.DatabaseInstance, valueOriginX, rowY int, copied *copyHit) string {
+	switch label {
+	case "Engine:", "Port:":
+		return styleValueWithCopiedHit(plainValue, valueOriginX, rowY, ValueHighlightStyle, copied)
+	case "Status:":
+		if copied == nil {
+			return statusLabel(inst.Status)
+		}
+		return styleStatusWithCopiedHit(inst.Status, valueOriginX, rowY, copied)
+	default:
+		return styleValueWithCopiedHit(plainValue, valueOriginX, rowY, ValueStyle, copied)
+	}
+}
+
+func renderDetailRows(inst *core.DatabaseInstance, panelWidth int) []string {
+	return renderDetailRowsWithCopiedHit(inst, panelWidth, 0, 0, nil)
+}
+
+func renderDetailRowsWithCopiedHit(inst *core.DatabaseInstance, panelWidth int, originX, originY int, copied *copyHit) []string {
+	plain := plainDetailFields(inst, panelWidth)
 
 	if panelWidth < 70 {
-		rows := make([]string, 0, len(fields))
-		for _, f := range fields {
-			rows = append(rows, detailField(f.label, f.value))
+		rows := make([]string, 0, len(plain))
+		rowY := originY
+		for _, f := range plain {
+			value := styledDetailValueWithCopiedHit(f.Label, f.Value, inst, valueOriginX(originX), rowY, copied)
+			rows = append(rows, detailField(f.Label, value))
+			rowY++
 		}
 		return rows
 	}
@@ -196,14 +353,19 @@ func renderDetailRows(inst *core.DatabaseInstance, panelWidth int) []string {
 	col2Style := lipgloss.NewStyle().Width(col2W).Background(BgSurface)
 
 	var rows []string
-	for i := 0; i < len(fields); i += 2 {
-		left := col1Style.Render(detailField(fields[i].label, fields[i].value))
-		if i+1 < len(fields) {
-			right := col2Style.Render(detailField(fields[i+1].label, fields[i+1].value))
+	rowY := originY
+	for i := 0; i < len(plain); i += 2 {
+		leftValue := styledDetailValueWithCopiedHit(plain[i].Label, plain[i].Value, inst, valueOriginX(originX), rowY, copied)
+		left := col1Style.Render(detailField(plain[i].Label, leftValue))
+		if i+1 < len(plain) {
+			col2X := originX + col1W + colGap
+			rightValue := styledDetailValueWithCopiedHit(plain[i+1].Label, plain[i+1].Value, inst, valueOriginX(col2X), rowY, copied)
+			right := col2Style.Render(detailField(plain[i+1].Label, rightValue))
 			rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, left, surfaceGap(colGap), right))
 		} else {
 			rows = append(rows, left)
 		}
+		rowY++
 	}
 	return rows
 }
@@ -276,4 +438,23 @@ func mainContentHeight(termHeight int) int {
 		return 6
 	}
 	return h
+}
+
+func splitPanelHalfHeight(contentHeight int) (top, bottom int) {
+	top = contentHeight / 2
+	bottom = contentHeight - top
+	if top < 3 {
+		top = 3
+	}
+	if bottom < 3 {
+		bottom = 3
+	}
+	if top+bottom > contentHeight {
+		top = contentHeight - bottom
+		if top < 3 {
+			top = 3
+			bottom = contentHeight - top
+		}
+	}
+	return top, bottom
 }

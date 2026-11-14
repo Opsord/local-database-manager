@@ -35,6 +35,7 @@ type DatabaseInstance struct {
 	Password      string            `json:"password"`
 	Schema        string            `json:"schema"`
 	Volume        string            `json:"volume"`
+	Version       string            `json:"version"`
 	Status        ContainerStatus   `json:"status"`
 	MemoryUsage   string            `json:"memory_usage"`
 	MemoryLimit   string            `json:"memory_limit"`
@@ -171,6 +172,7 @@ func ParseEnvFile(filePath string) (*DatabaseInstance, error) {
 			schema = "public"
 		}
 		inst.Schema = schema
+		inst.Version = NormalizePostgresVersion(rawEnv["POSTGRES_VERSION"])
 		inst.Volume = rawEnv["POSTGRES_VOLUME"]
 
 	case "sqlserver":
@@ -203,6 +205,25 @@ func ParseEnvFile(filePath string) (*DatabaseInstance, error) {
 		}
 		inst.Schema = schema
 		inst.Volume = rawEnv["SQLSERVER_VOLUME"]
+
+		ver := rawEnv["SQLSERVER_VERSION"]
+		if ver == "" {
+			img := rawEnv["SQLSERVER_IMAGE"]
+			if strings.Contains(strings.ToLower(img), "azure-sql-edge") {
+				ver = SQLServerAzureEdge
+			} else {
+				ver = SQLServer2022
+			}
+		}
+		inst.Version = NormalizeSQLServerVersion(ver)
+
+		if rawEnv["MEMORY_LIMIT"] == "" {
+			if inst.Version == SQLServerAzureEdge {
+				inst.MemoryLimit = "1G"
+			} else {
+				inst.MemoryLimit = "2G"
+			}
+		}
 	}
 
 	return inst, nil

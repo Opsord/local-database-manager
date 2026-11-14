@@ -1,0 +1,10 @@
+# Local Database Manager — app settings.
+# Durations use Go syntax: 5s, 10s, 1m.
+
+# How often to re-check Docker / Podman daemon health.
+engine_health_interval: 5s
+
+# --- not read yet ---
+# engine_health_timeout: 3s
+# compose_start_timeout: 45s
+# status_message_timeout: 4s

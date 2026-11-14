@@ -28,6 +28,7 @@ instances/*.env
 # Superpowers & Agent Scratch
 .superpowers/
 scratch/
+docs/superpowers
 
 # Operating System & IDE
 .DS_Store
@@ -36,3 +37,9 @@ Thumbs.db
 .vscode/
 *.swp
 *~
+
+# Git worktrees
+.worktrees/
+
+# Application and debug logs
+*.log

@@ -27,6 +27,10 @@ local-database-manager/
 │   └── db-manager/
 │       └── main.go                  # CLI entrypoint and project root detection
 │
+├── scripts/                         # Setup and automation helper scripts
+│   ├── setup-alias.ps1              # Windows PowerShell shortcut setup script
+│   └── setup-alias.sh               # Bash/Zsh shortcut setup script
+│
 ├── internal/
 │   ├── core/                        # Core domain logic
 │   │   ├── instance.go              # DatabaseInstance model, .env parser & URI builder
@@ -41,6 +45,7 @@ local-database-manager/
 │       ├── view_wizard.go           # Interactive new instance creation form modal
 │       └── view_logs.go             # Real-time container log streamer viewport
 │
+├── config.yml                       # App settings (engine health poll interval)
 ├── go.mod
 ├── go.sum
 └── README.md

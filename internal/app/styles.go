@@ -103,6 +103,10 @@ var (
 			Foreground(WarningColor).
 			Background(BgSurface)
 
+	WarningStyle = lipgloss.NewStyle().
+			Foreground(WarningColor).
+			Background(BgSurface)
+
 	MutedStyle = lipgloss.NewStyle().
 			Foreground(MutedColor).
 			Background(BgSurface)
@@ -153,4 +157,9 @@ var (
 
 	BadgeUnknownStyle = BadgeStyle.Copy().
 				Foreground(MutedColor)
+
+	CopiedTokenStyle = lipgloss.NewStyle().
+				Foreground(FgText).
+				Background(SelectedBg).
+				Bold(true)
 )

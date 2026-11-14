@@ -121,6 +121,12 @@ SQLSERVER_VOLUME=sql_orders_data
 	if inst.Schema != "custom_dbo" {
 		t.Errorf("expected Schema 'custom_dbo', got '%s'", inst.Schema)
 	}
+	if inst.Version != "2022" {
+		t.Errorf("expected Version '2022', got '%s'", inst.Version)
+	}
+	if inst.MemoryLimit != "2G" {
+		t.Errorf("expected MemoryLimit '2G', got '%s'", inst.MemoryLimit)
+	}
 
 	expectedURI := "sqlserver://sa:SuperSecretPass123%21@localhost:1434?database=orders_db"
 	if uri := inst.ConnectionURI(); uri != expectedURI {
@@ -130,5 +136,110 @@ SQLSERVER_VOLUME=sql_orders_data
 	envBlock := inst.BackendEnvBlock()
 	if !strings.Contains(envBlock, "DB_PORT=1434") || !strings.Contains(envBlock, "DB_SCHEMA=custom_dbo") {
 		t.Errorf("BackendEnvBlock failed: got '%s'", envBlock)
+	}
+}
+
+func TestParseEnvFile_PostgresVersionDefault(t *testing.T) {
+	tmpDir := t.TempDir()
+	envPath := filepath.Join(tmpDir, "legacy.env")
+	content := `ENGINE=postgres
+RUNTIME=docker
+CONTAINER_NAME=pg-legacy
+COMPOSE_PROJECT_NAME=pg-legacy
+POSTGRES_PORT=5432
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=p
+POSTGRES_DB=db
+POSTGRES_VOLUME=pgdata_legacy
+`
+	if err := os.WriteFile(envPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	inst, err := ParseEnvFile(envPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst.Version != DefaultPostgresVersion {
+		t.Fatalf("Version=%q, want %q", inst.Version, DefaultPostgresVersion)
+	}
+}
+
+func TestParseEnvFile_PostgresVersionExplicit(t *testing.T) {
+	tmpDir := t.TempDir()
+	envPath := filepath.Join(tmpDir, "v16.env")
+	content := `ENGINE=postgres
+RUNTIME=docker
+CONTAINER_NAME=pg-v16
+COMPOSE_PROJECT_NAME=pg-v16
+POSTGRES_VERSION=16
+POSTGRES_PORT=5432
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=p
+POSTGRES_DB=db
+POSTGRES_VOLUME=pgdata_v16_16
+`
+	if err := os.WriteFile(envPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	inst, err := ParseEnvFile(envPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst.Version != "16" {
+		t.Fatalf("Version=%q, want 16", inst.Version)
+	}
+}
+
+func TestParseEnvFile_SQLServerAzureEdgeVersionExplicit(t *testing.T) {
+	tmpDir := t.TempDir()
+	envPath := filepath.Join(tmpDir, "edge.env")
+	content := `ENGINE=sqlserver
+RUNTIME=docker
+CONTAINER_NAME=sql-edge
+COMPOSE_PROJECT_NAME=sql-edge
+SQLSERVER_VERSION=azure-edge
+SQLSERVER_PORT=1433
+SA_PASSWORD=SuperSecretPass123!
+SQLSERVER_DB=edge_db
+`
+	if err := os.WriteFile(envPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	inst, err := ParseEnvFile(envPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst.Version != SQLServerAzureEdge {
+		t.Fatalf("Version=%q, want %q", inst.Version, SQLServerAzureEdge)
+	}
+	if inst.MemoryLimit != "1G" {
+		t.Fatalf("MemoryLimit=%q, want 1G", inst.MemoryLimit)
+	}
+}
+
+func TestParseEnvFile_SQLServerAzureEdgeInferredFromImage(t *testing.T) {
+	tmpDir := t.TempDir()
+	envPath := filepath.Join(tmpDir, "edge_img.env")
+	content := `ENGINE=sqlserver
+RUNTIME=docker
+CONTAINER_NAME=sql-edge-img
+COMPOSE_PROJECT_NAME=sql-edge-img
+SQLSERVER_IMAGE=mcr.microsoft.com/azure-sql-edge:latest
+SQLSERVER_PORT=1433
+SA_PASSWORD=SuperSecretPass123!
+SQLSERVER_DB=edge_db
+`
+	if err := os.WriteFile(envPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	inst, err := ParseEnvFile(envPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst.Version != SQLServerAzureEdge {
+		t.Fatalf("Version=%q, want %q", inst.Version, SQLServerAzureEdge)
+	}
+	if inst.MemoryLimit != "1G" {
+		t.Fatalf("MemoryLimit=%q, want 1G", inst.MemoryLimit)
 	}
 }

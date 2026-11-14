@@ -6,12 +6,21 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"local-database-manager/internal/core"
 
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+)
+
+type wizardKind int
+
+const (
+	wizardCreate wizardKind = iota
+	wizardEdit
 )
 
 type wizardStep int
@@ -19,11 +28,11 @@ type wizardStep int
 const (
 	StepEngine wizardStep = iota
 	StepRuntime
+	StepVersion
 	StepName
 	StepContainerName
 	StepPort
 	StepDatabase
-	StepVolume
 	StepPassword
 	StepMemoryLimit
 	StepReview
@@ -34,26 +43,144 @@ type wizardModel struct {
 	instancesDir string
 	instances    []*core.DatabaseInstance
 
+	kind wizardKind
+
+	sourceName          string
+	sourceEnvPath       string
+	sourceRuntime       string
+	sourceProjectName   string
+	sourceContainerName string
+	sourceEngine        string
+	sourceVolume        string
+	wasRunning          bool
+
 	step wizardStep
+
+	maxReached wizardStep
 
 	selectedEngineIdx  int
 	selectedRuntimeIdx int
+	selectedVersionIdx int
 
 	engines  []string
 	runtimes []string
 
 	inputs []textinput.Model
+
+	scrollViewport viewport.Model
+}
+
+func engineDisplay(id string) string {
+	if id == "sqlserver" {
+		return "SQL Server"
+	}
+	return "Postgres"
+}
+
+func runtimeDisplay(id string) string {
+	if id == "podman" {
+		return "Podman"
+	}
+	return "Docker"
+}
+
+func defaultPostgresVersionIdx() int {
+	for i, v := range core.PostgresVersions {
+		if v == core.DefaultPostgresVersion {
+			return i
+		}
+	}
+	return len(core.PostgresVersions) - 1
+}
+
+func defaultVersionIdx(engine string) int {
+	if engine == "sqlserver" {
+		for i, v := range core.SQLServerVersions {
+			if v == core.DefaultSQLServerVersion {
+				return i
+			}
+		}
+		return 0
+	}
+	return defaultPostgresVersionIdx()
+}
+
+func (w *wizardModel) availableVersions() []string {
+	if w.isPostgres() {
+		return core.PostgresVersions
+	}
+	return core.SQLServerVersions
+}
+
+func (w *wizardModel) derivedVolume() string {
+	name := core.SanitizeIdent(w.inputs[0].Value())
+	engine := w.engines[w.selectedEngineIdx]
+	ver := ""
+	if engine == "postgres" {
+		ver = w.selectedVersion()
+	}
+	return core.DeriveVolumeName(engine, name, ver)
+}
+
+func (w *wizardModel) selectedVersion() string {
+	versions := w.availableVersions()
+	if w.selectedVersionIdx < 0 || w.selectedVersionIdx >= len(versions) {
+		if w.isPostgres() {
+			return core.DefaultPostgresVersion
+		}
+		return core.DefaultSQLServerVersion
+	}
+	return versions[w.selectedVersionIdx]
+}
+
+func versionDisplay(engine, ver string) string {
+	if engine == "sqlserver" {
+		switch ver {
+		case core.SQLServer2022:
+			return "2022 (Full Developer)"
+		case core.SQLServerAzureEdge:
+			return "Azure SQL Edge (ARM64)"
+		}
+	}
+	return ver
+}
+
+func (w *wizardModel) isPostgres() bool {
+	return w.engines[w.selectedEngineIdx] == "postgres"
+}
+
+func (w *wizardModel) adjustStepForEngine(step wizardStep) wizardStep {
+	if w.kind == wizardEdit && step == StepRuntime {
+		return StepVersion
+	}
+	return step
+}
+
+func (w *wizardModel) runtimeLocked() bool {
+	return w.kind == wizardEdit
+}
+
+func (w *wizardModel) blurAll() {
+	for i := range w.inputs {
+		w.inputs[i].Blur()
+	}
+}
+
+func (w *wizardModel) focusInput(i int) {
+	w.blurAll()
+	if i >= 0 && i < len(w.inputs) {
+		w.inputs[i].Focus()
+	}
 }
 
 func newWizardModel(projectRoot, instancesDir string, existing []*core.DatabaseInstance) wizardModel {
 	engines := []string{"postgres", "sqlserver"}
 	runtimes := []string{"docker", "podman"}
 
-	inputs := make([]textinput.Model, 7)
+	inputs := make([]textinput.Model, 6)
 
 	inputs[0] = styleTextInput(textinput.New())
 	inputs[0].Placeholder = "my_new_instance"
-	inputs[0].Focus()
 
 	inputs[1] = styleTextInput(textinput.New())
 	inputs[1].Placeholder = "pg-my-new-instance"
@@ -66,25 +193,307 @@ func newWizardModel(projectRoot, instancesDir string, existing []*core.DatabaseI
 	inputs[3].Placeholder = "my_new_db"
 
 	inputs[4] = styleTextInput(textinput.New())
-	inputs[4].Placeholder = "pgdata_my_new_instance"
+	inputs[4].SetValue("postgres")
 
 	inputs[5] = styleTextInput(textinput.New())
-	inputs[5].SetValue("postgres")
+	inputs[5].SetValue("512M")
 
-	inputs[6] = styleTextInput(textinput.New())
-	inputs[6].SetValue("512M")
+	for i := range inputs {
+		inputs[i].Prompt = ""
+		inputs[i].Width = 32
+	}
 
-	return wizardModel{
+	w := wizardModel{
 		projectRoot:        projectRoot,
 		instancesDir:       instancesDir,
 		instances:          existing,
+		kind:               wizardCreate,
 		step:               StepEngine,
+		maxReached:         StepEngine,
 		selectedEngineIdx:  0,
 		selectedRuntimeIdx: 0,
+		selectedVersionIdx: defaultPostgresVersionIdx(),
 		engines:            engines,
 		runtimes:           runtimes,
 		inputs:             inputs,
+		scrollViewport:     viewport.New(60, 8),
 	}
+	w.scrollViewport.Style = lipgloss.NewStyle().Background(BgSurface)
+	w.blurAll()
+	return w
+}
+
+func newEditWizardModel(projectRoot, instancesDir string, existing []*core.DatabaseInstance, inst *core.DatabaseInstance) wizardModel {
+	w := newWizardModel(projectRoot, instancesDir, existing)
+	w.kind = wizardEdit
+	w.sourceName = inst.Name
+	w.sourceEnvPath = inst.EnvFilePath
+	w.sourceRuntime = inst.Runtime
+	w.sourceProjectName = inst.ProjectName
+	w.sourceContainerName = inst.ContainerName
+	w.sourceEngine = inst.EngineType
+	w.sourceVolume = inst.Volume
+	w.wasRunning = inst.Status == core.StatusReady || inst.Status == core.StatusStarting
+
+	for i, e := range w.engines {
+		if e == inst.EngineType {
+			w.selectedEngineIdx = i
+			break
+		}
+	}
+	for i, r := range w.runtimes {
+		if r == inst.Runtime {
+			w.selectedRuntimeIdx = i
+			break
+		}
+	}
+
+	w.inputs[0].SetValue(inst.Name)
+	w.inputs[1].SetValue(inst.ContainerName)
+	w.inputs[2].SetValue(strconv.Itoa(inst.Port))
+	w.inputs[3].SetValue(inst.Database)
+	w.inputs[4].SetValue(inst.Password)
+	if inst.MemoryLimit != "" {
+		w.inputs[5].SetValue(inst.MemoryLimit)
+	}
+	if inst.EngineType == "postgres" && inst.Version != "" {
+		normalized := core.NormalizePostgresVersion(inst.Version)
+		for i, v := range core.PostgresVersions {
+			if v == normalized {
+				w.selectedVersionIdx = i
+				break
+			}
+		}
+	} else if inst.EngineType == "sqlserver" && inst.Version != "" {
+		normalized := core.NormalizeSQLServerVersion(inst.Version)
+		for i, v := range core.SQLServerVersions {
+			if v == normalized {
+				w.selectedVersionIdx = i
+				break
+			}
+		}
+	}
+
+	w.maxReached = StepReview
+	w.step = StepReview
+	w.blurAll()
+	return w
+}
+
+func (w *wizardModel) setFocus(step wizardStep) {
+	if step < StepEngine {
+		step = StepEngine
+	}
+	if step > w.maxReached {
+		step = w.maxReached
+	}
+	step = w.adjustStepForEngine(step)
+	w.step = step
+	w.blurAll()
+	if step >= StepName && step <= StepMemoryLimit {
+		w.focusInput(int(step) - int(StepName))
+	}
+	w.syncScrollToFocus()
+}
+
+func (w *wizardModel) moveFocus(delta int) {
+	next := w.step + wizardStep(delta)
+	if w.runtimeLocked() {
+		if delta > 0 && next == StepRuntime {
+			next = StepVersion
+		}
+		if delta < 0 && next == StepRuntime {
+			next = StepEngine
+		}
+	}
+	w.setFocus(next)
+}
+
+func (w *wizardModel) cycleOption(delta int) {
+	switch w.step {
+	case StepEngine:
+		n := w.selectedEngineIdx + delta
+		if n < 0 {
+			n = 0
+		}
+		if n >= len(w.engines) {
+			n = len(w.engines) - 1
+		}
+		w.selectedEngineIdx = n
+	case StepRuntime:
+		if w.runtimeLocked() {
+			return
+		}
+		n := w.selectedRuntimeIdx + delta
+		if n < 0 {
+			n = 0
+		}
+		if n >= len(w.runtimes) {
+			n = len(w.runtimes) - 1
+		}
+		w.selectedRuntimeIdx = n
+	case StepVersion:
+		versions := w.availableVersions()
+		n := w.selectedVersionIdx + delta
+		if n < 0 {
+			n = 0
+		}
+		if n >= len(versions) {
+			n = len(versions) - 1
+		}
+		if n != w.selectedVersionIdx {
+			w.selectedVersionIdx = n
+			if !w.isPostgres() {
+				currentMem := w.inputs[5].Value()
+				if w.selectedVersion() == core.SQLServerAzureEdge {
+					if currentMem == "2G" || currentMem == "" {
+						w.inputs[5].SetValue("1G")
+					}
+				} else {
+					if currentMem == "1G" || currentMem == "" {
+						w.inputs[5].SetValue("2G")
+					}
+				}
+			}
+		}
+	}
+}
+
+func (w *wizardModel) confirmAdvance() bool {
+	switch w.step {
+	case StepEngine:
+		w.maxReached = maxStep(w.maxReached, StepRuntime)
+		if w.runtimeLocked() {
+			w.maxReached = maxStep(w.maxReached, StepVersion)
+			w.setFocus(StepVersion)
+			return true
+		}
+		w.setFocus(StepRuntime)
+		return true
+	case StepRuntime:
+		w.maxReached = maxStep(w.maxReached, StepVersion)
+		w.setFocus(StepVersion)
+		return true
+	case StepVersion:
+		w.maxReached = maxStep(w.maxReached, StepName)
+		w.setFocus(StepName)
+		return true
+	case StepName:
+		name := core.SanitizeIdent(w.inputs[0].Value())
+		if name == "" {
+			return false
+		}
+		if w.nameTaken(name) {
+			return false
+		}
+		w.applyNameAutofill()
+		w.maxReached = maxStep(w.maxReached, StepContainerName)
+		w.setFocus(StepContainerName)
+		return true
+	case StepContainerName:
+		w.maxReached = maxStep(w.maxReached, StepPort)
+		w.setFocus(StepPort)
+		return true
+	case StepPort:
+		w.maxReached = maxStep(w.maxReached, StepDatabase)
+		w.setFocus(StepDatabase)
+		return true
+	case StepDatabase:
+		w.maxReached = maxStep(w.maxReached, StepPassword)
+		w.setFocus(StepPassword)
+		return true
+	case StepPassword:
+		w.maxReached = maxStep(w.maxReached, StepMemoryLimit)
+		w.setFocus(StepMemoryLimit)
+		return true
+	case StepMemoryLimit:
+		w.maxReached = maxStep(w.maxReached, StepReview)
+		w.setFocus(StepReview)
+		return true
+	default:
+		return false
+	}
+}
+
+func maxStep(a, b wizardStep) wizardStep {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func (w *wizardModel) applyNameAutofill() {
+	if w.kind == wizardEdit {
+		return
+	}
+	name := core.SanitizeIdent(w.inputs[0].Value())
+	if name != w.inputs[0].Value() {
+		w.inputs[0].SetValue(name)
+	}
+	engine := w.engines[w.selectedEngineIdx]
+
+	prefix, _, defaultPort, defaultPass, defaultMem := engineDefaults(engine)
+
+	if w.inputs[1].Value() == "" {
+		w.inputs[1].SetValue(fmt.Sprintf("%s-%s", prefix, name))
+	}
+	if w.inputs[2].Value() == "" || w.inputs[2].Value() == "5432" {
+		freePort := core.FindNextFreePort(mustAtoi(defaultPort), w.instances)
+		w.inputs[2].SetValue(strconv.Itoa(freePort))
+	}
+	if w.inputs[3].Value() == "" {
+		w.inputs[3].SetValue(fmt.Sprintf("%s_db", name))
+	}
+	if w.inputs[4].Value() == "" || w.inputs[4].Value() == "postgres" {
+		w.inputs[4].SetValue(defaultPass)
+	}
+	if w.inputs[5].Value() == "" || w.inputs[5].Value() == "512M" {
+		w.inputs[5].SetValue(defaultMem)
+	}
+}
+
+func engineDefaults(engine string) (prefix, volPrefix, port, pass, mem string) {
+	if engine == "sqlserver" {
+		return "sql", "sqlserver", "1433", "SuperPassword123!", "2G"
+	}
+	return "pg", "pgdata", "5432", "postgres", "512M"
+}
+
+func (w *wizardModel) applyEngineDefaults(prevEngine, nextEngine string) {
+	if prevEngine == nextEngine {
+		return
+	}
+	name := core.SanitizeIdent(w.inputs[0].Value())
+	prevP, _, prevPort, prevPass, prevMem := engineDefaults(prevEngine)
+	nextP, _, nextPort, nextPass, nextMem := engineDefaults(nextEngine)
+
+	if name != "" {
+		oldCont := fmt.Sprintf("%s-%s", prevP, name)
+		newCont := fmt.Sprintf("%s-%s", nextP, name)
+		if w.inputs[1].Value() == oldCont {
+			w.inputs[1].SetValue(newCont)
+		}
+	}
+	if w.inputs[2].Value() == prevPort {
+		free := core.FindNextFreePort(mustAtoi(nextPort), w.instances)
+		w.inputs[2].SetValue(strconv.Itoa(free))
+	}
+	if w.inputs[4].Value() == prevPass {
+		w.inputs[4].SetValue(nextPass)
+	}
+	if w.inputs[5].Value() == prevMem {
+		w.inputs[5].SetValue(nextMem)
+	}
+	w.selectedVersionIdx = defaultVersionIdx(nextEngine)
+}
+
+func mustAtoi(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
+}
+
+func (w *wizardModel) onTextStep() bool {
+	return w.step >= StepName && w.step <= StepMemoryLimit
 }
 
 func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -92,131 +501,200 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		onText := w.onTextStep()
 		switch msg.String() {
-		case "esc", "ctrl+c":
+		case "ctrl+c":
+			if onText {
+				idx := int(w.step) - int(StepName)
+				val := w.inputs[idx].Value()
+				if val != "" {
+					if err := core.CopyToClipboard(val); err != nil {
+						m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
+						m.statusIsErr = true
+					} else {
+						m.statusMsg = fmt.Sprintf("Copied '%s' to clipboard", val)
+						m.statusIsErr = false
+					}
+					return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
+				}
+			}
 			m.mode = ModeMain
-			m.statusMsg = "Instance creation cancelled"
+			if w.kind == wizardEdit {
+				m.statusMsg = "Instance edit cancelled"
+			} else {
+				m.statusMsg = "Instance creation cancelled"
+			}
 			m.statusIsErr = false
 			return m, nil
 
+		case "ctrl+shift+c":
+			if onText {
+				idx := int(w.step) - int(StepName)
+				val := w.inputs[idx].Value()
+				if val != "" {
+					if err := core.CopyToClipboard(val); err != nil {
+						m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
+						m.statusIsErr = true
+					} else {
+						m.statusMsg = fmt.Sprintf("Copied '%s' to clipboard", val)
+						m.statusIsErr = false
+					}
+					return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
+				}
+			}
+			return m, nil
+
+		case "esc":
+			m.mode = ModeMain
+			if w.kind == wizardEdit {
+				m.statusMsg = "Instance edit cancelled"
+			} else {
+				m.statusMsg = "Instance creation cancelled"
+			}
+			m.statusIsErr = false
+			return m, nil
+
+		case "o":
+			if w.kind == wizardEdit && !onText {
+				if err := core.OpenInEditor(w.sourceEnvPath); err != nil {
+					m.statusMsg = fmt.Sprintf("Failed to open editor: %v", err)
+					m.statusIsErr = true
+				} else {
+					m.statusMsg = fmt.Sprintf("Opening %s in editor...", w.sourceEnvPath)
+					m.statusIsErr = false
+				}
+				return m, nil
+			}
+
 		case "enter":
-			switch w.step {
-			case StepEngine:
-				w.step = StepRuntime
-				return m, nil
-
-			case StepRuntime:
-				w.step = StepName
-				w.inputs[0].Focus()
-				return m, nil
-
-			case StepName:
-				name := strings.TrimSpace(w.inputs[0].Value())
-				if name == "" {
+			if w.step == StepReview {
+				name := core.SanitizeIdent(w.inputs[0].Value())
+				if w.nameTaken(name) {
+					m.statusMsg = fmt.Sprintf("Instance name '%s' is already taken", name)
+					m.statusIsErr = true
 					return m, nil
 				}
-				engine := w.engines[w.selectedEngineIdx]
 
-				prefix := "pg"
-				defaultPort := 5432
-				defaultPass := "postgres"
-				defaultMem := "512M"
-				volPrefix := "pgdata"
-
-				if engine == "sqlserver" {
-					prefix = "sql"
-					defaultPort = 1433
-					defaultPass = "SuperPassword123!"
-					defaultMem = "2G"
-					volPrefix = "sqlserver"
+				var oldInst *core.DatabaseInstance
+				if w.kind == wizardEdit && w.wasRunning {
+					oldInst = &core.DatabaseInstance{
+						Name:          w.sourceName,
+						Runtime:       w.sourceRuntime,
+						ProjectName:   w.sourceProjectName,
+						ContainerName: w.sourceContainerName,
+						EnvFilePath:   w.sourceEnvPath,
+						EngineType:    w.sourceEngine,
+					}
 				}
 
-				if w.inputs[1].Value() == "" {
-					w.inputs[1].SetValue(fmt.Sprintf("%s-%s", prefix, name))
-				}
-				if w.inputs[2].Value() == "" || w.inputs[2].Value() == "5432" {
-					freePort := core.FindNextFreePort(defaultPort, w.instances)
-					w.inputs[2].SetValue(strconv.Itoa(freePort))
-				}
-				if w.inputs[3].Value() == "" {
-					w.inputs[3].SetValue(fmt.Sprintf("%s_db", name))
-				}
-				if w.inputs[4].Value() == "" {
-					w.inputs[4].SetValue(fmt.Sprintf("%s_%s", volPrefix, name))
-				}
-				if w.inputs[5].Value() == "" || w.inputs[5].Value() == "postgres" {
-					w.inputs[5].SetValue(defaultPass)
-				}
-				if w.inputs[6].Value() == "" || w.inputs[6].Value() == "512M" {
-					w.inputs[6].SetValue(defaultMem)
-				}
-
-				w.step = StepContainerName
-				w.inputs[1].Focus()
-				return m, nil
-
-			case StepContainerName:
-				w.step = StepPort
-				w.inputs[2].Focus()
-				return m, nil
-
-			case StepPort:
-				w.step = StepDatabase
-				w.inputs[3].Focus()
-				return m, nil
-
-			case StepDatabase:
-				w.step = StepVolume
-				w.inputs[4].Focus()
-				return m, nil
-
-			case StepVolume:
-				w.step = StepPassword
-				w.inputs[5].Focus()
-				return m, nil
-
-			case StepPassword:
-				w.step = StepMemoryLimit
-				w.inputs[6].Focus()
-				return m, nil
-
-			case StepMemoryLimit:
-				w.step = StepReview
-				return m, nil
-
-			case StepReview:
 				if err := w.saveInstance(); err != nil {
 					m.statusMsg = fmt.Sprintf("Error saving instance: %v", err)
 					m.statusIsErr = true
-					m.mode = ModeMain
 					return m, nil
 				}
 
+				newVolume := w.derivedVolume()
+				volumeChanged := w.kind == wizardEdit && w.sourceVolume != newVolume
+
+				if w.kind == wizardEdit && w.wasRunning {
+					m.clearConfirms()
+					m.confirmRestartAfterEdit = true
+					m.pendingRestartOld = oldInst
+					m.pendingRestartNewName = name
+					if oldInst != nil && oldInst.EnvFilePath != filepath.Join(w.instancesDir, name+".env") {
+						m.pendingDeleteEnvPath = oldInst.EnvFilePath
+					}
+					m.mode = ModeMain
+					if volumeChanged {
+						m.statusMsg = fmt.Sprintf("Saved (volume → %s; old volume kept). Restart container with new config? Press 'y' to confirm, 'n' to cancel", newVolume)
+					} else {
+						m.statusMsg = "Saved. Restart container with new config? Press 'y' to confirm, 'n' to cancel"
+					}
+					m.statusIsErr = true
+					return m, m.reloadInstancesCmd()
+				}
+
 				m.mode = ModeMain
-				m.statusMsg = fmt.Sprintf("Instance '%s' created successfully!", w.inputs[0].Value())
+				if w.kind == wizardEdit {
+					if volumeChanged {
+						m.statusMsg = fmt.Sprintf("Volume will change to %s. Previous volume %s is kept until you Purge it.", newVolume, w.sourceVolume)
+					} else {
+						m.statusMsg = fmt.Sprintf("Instance '%s' saved", name)
+					}
+				} else {
+					m.statusMsg = fmt.Sprintf("Instance '%s' created successfully!", name)
+				}
 				m.statusIsErr = false
 				return m, m.reloadInstancesCmd()
 			}
-
-		case "up", "k":
-			if w.step == StepEngine && w.selectedEngineIdx > 0 {
-				w.selectedEngineIdx--
-			} else if w.step == StepRuntime && w.selectedRuntimeIdx > 0 {
-				w.selectedRuntimeIdx--
-			}
+			_ = w.confirmAdvance()
 			return m, nil
 
-		case "down", "j":
-			if w.step == StepEngine && w.selectedEngineIdx < len(w.engines)-1 {
-				w.selectedEngineIdx++
-			} else if w.step == StepRuntime && w.selectedRuntimeIdx < len(w.runtimes)-1 {
-				w.selectedRuntimeIdx++
-			}
+		case "up":
+			w.moveFocus(-1)
 			return m, nil
+
+		case "down":
+			w.moveFocus(1)
+			return m, nil
+
+		case "k":
+			if !onText {
+				w.moveFocus(-1)
+				return m, nil
+			}
+
+		case "j":
+			if !onText {
+				w.moveFocus(1)
+				return m, nil
+			}
+
+		case "left":
+			if !onText {
+				prev := w.engines[w.selectedEngineIdx]
+				w.cycleOption(-1)
+				if w.step == StepEngine {
+					w.applyEngineDefaults(prev, w.engines[w.selectedEngineIdx])
+				}
+				return m, nil
+			}
+
+		case "right":
+			if !onText {
+				prev := w.engines[w.selectedEngineIdx]
+				w.cycleOption(1)
+				if w.step == StepEngine {
+					w.applyEngineDefaults(prev, w.engines[w.selectedEngineIdx])
+				}
+				return m, nil
+			}
+
+		case "h":
+			if !onText {
+				prev := w.engines[w.selectedEngineIdx]
+				w.cycleOption(-1)
+				if w.step == StepEngine {
+					w.applyEngineDefaults(prev, w.engines[w.selectedEngineIdx])
+				}
+				return m, nil
+			}
+
+		case "l":
+			if !onText {
+				prev := w.engines[w.selectedEngineIdx]
+				w.cycleOption(1)
+				if w.step == StepEngine {
+					w.applyEngineDefaults(prev, w.engines[w.selectedEngineIdx])
+				}
+				return m, nil
+			}
+
+
 		}
 	}
 
-	if w.step >= StepName && w.step <= StepMemoryLimit {
+	if w.onTextStep() {
 		idx := int(w.step) - int(StepName)
 		var cmd tea.Cmd
 		w.inputs[idx], cmd = w.inputs[idx].Update(msg)
@@ -226,23 +704,46 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (w *wizardModel) nameTaken(name string) bool {
+	name = core.SanitizeIdent(name)
+	for _, inst := range w.instances {
+		if inst.Name == name {
+			if w.kind == wizardEdit && name == w.sourceName {
+				continue
+			}
+			return true
+		}
+	}
+	return false
+}
+
 func (w *wizardModel) saveInstance() error {
-	name := strings.TrimSpace(w.inputs[0].Value())
-	containerName := strings.TrimSpace(w.inputs[1].Value())
+	name := core.SanitizeIdent(w.inputs[0].Value())
+	containerName := core.SanitizeIdent(w.inputs[1].Value())
 	port := strings.TrimSpace(w.inputs[2].Value())
-	db := strings.TrimSpace(w.inputs[3].Value())
-	volume := strings.TrimSpace(w.inputs[4].Value())
-	pass := strings.TrimSpace(w.inputs[5].Value())
-	memLimit := strings.TrimSpace(w.inputs[6].Value())
+	db := core.SanitizeIdent(w.inputs[3].Value())
+	pass := strings.TrimSpace(w.inputs[4].Value())
+	memLimit := strings.TrimSpace(w.inputs[5].Value())
 	if memLimit == "" {
 		memLimit = "512M"
+	}
+	if name != "" {
+		w.inputs[0].SetValue(name)
+	}
+	if containerName != "" {
+		w.inputs[1].SetValue(containerName)
+	}
+	if db != "" {
+		w.inputs[3].SetValue(db)
 	}
 
 	engine := w.engines[w.selectedEngineIdx]
 	runtime := w.runtimes[w.selectedRuntimeIdx]
+	volume := w.derivedVolume()
 
 	var content string
 	if engine == "postgres" {
+		version := w.selectedVersion()
 		content = fmt.Sprintf(`ENGINE=postgres
 RUNTIME=%s
 
@@ -255,9 +756,12 @@ POSTGRES_USER=postgres
 POSTGRES_PASSWORD=%s
 POSTGRES_DB=%s
 POSTGRES_SCHEMA=public
+POSTGRES_VERSION=%s
 POSTGRES_VOLUME=%s
-`, runtime, containerName, containerName, memLimit, port, pass, db, volume)
+`, runtime, containerName, containerName, memLimit, port, pass, db, version, volume)
 	} else {
+		version := w.selectedVersion()
+		image := core.SQLServerImageForVersion(version)
 		content = fmt.Sprintf(`ENGINE=sqlserver
 RUNTIME=%s
 
@@ -270,100 +774,291 @@ SA_PASSWORD=%s
 SQLSERVER_DB=%s
 SQLSERVER_SCHEMA=dbo
 SQLSERVER_VOLUME=%s
-`, runtime, containerName, containerName, memLimit, port, pass, db, volume)
+SQLSERVER_VERSION=%s
+SQLSERVER_IMAGE=%s
+`, runtime, containerName, containerName, memLimit, port, pass, db, volume, version, image)
 	}
 
-	filePath := filepath.Join(w.instancesDir, fmt.Sprintf("%s.env", name))
-	return os.WriteFile(filePath, []byte(content), 0644)
+	newPath := filepath.Join(w.instancesDir, fmt.Sprintf("%s.env", name))
+	if err := os.WriteFile(newPath, []byte(content), 0644); err != nil {
+		return err
+	}
+	if w.kind == wizardEdit && newPath != w.sourceEnvPath {
+		if w.wasRunning {
+			w.sourceEnvPath = newPath
+			w.sourceName = name
+		} else {
+			if err := os.Remove(w.sourceEnvPath); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			w.sourceEnvPath = newPath
+			w.sourceName = name
+		}
+	}
+	return nil
 }
 
-func (m *AppModel) viewWizard() string {
+func (m *AppModel) wizardPreviewRow(inner int, label, value string) string {
+	return surfaceLine(inner, joinWithSurfaceGaps([]string{
+		LabelStyle.Render(label),
+		MutedStyle.Render(value),
+	}, 1))
+}
+
+func (m *AppModel) wizardValueRow(inner int, label, value string, inputIdx int, extra string) string {
 	w := &m.wizard
-	boxWidth := m.width - 12
-	if boxWidth < 50 {
-		boxWidth = 50
+	parts := []string{LabelStyle.Render(label)}
+	active := w.step == wizardStep(int(StepName)+inputIdx)
+	if active && w.step != StepReview {
+		parts = append(parts, wrapInputField(w.inputs[inputIdx].View()))
+	} else {
+		parts = append(parts, ValueStyle.Render(value))
 	}
-	if boxWidth > 72 {
-		boxWidth = 72
+	if extra != "" {
+		used := 14 + 1
+		if active && w.step != StepReview {
+			used += w.inputs[inputIdx].Width + 1
+		} else {
+			used += displayWidth(value) + 1
+		}
+		if used+displayWidth(extra) <= inner {
+			parts = append(parts, MutedStyle.Render(extra))
+		}
+	}
+	return surfaceLine(inner, joinWithSurfaceGaps(parts, 1))
+}
+
+func (w *wizardModel) bodyLineForStep(step wizardStep) int {
+	// Body is only unlocked field rows (title/hints are fixed outside the viewport).
+	focusStep := step
+	if focusStep > StepMemoryLimit {
+		focusStep = StepMemoryLimit
+	}
+	line := 0
+	for s := StepEngine; s <= focusStep; s++ {
+		if s <= w.maxReached {
+			line++
+		}
+	}
+	if focusStep >= StepPassword && w.maxReached >= StepDatabase {
+		line++
+	}
+	if line == 0 {
+		return 0
+	}
+	return line - 1
+}
+
+func (w *wizardModel) syncScrollToFocus() {
+	if w.step == StepReview {
+		w.scrollViewport.GotoBottom()
+		return
+	}
+	target := w.bodyLineForStep(w.step)
+	if target < w.scrollViewport.YOffset {
+		w.scrollViewport.YOffset = target
+	}
+	if w.scrollViewport.Height > 0 && target >= w.scrollViewport.YOffset+w.scrollViewport.Height {
+		w.scrollViewport.YOffset = target - w.scrollViewport.Height + 1
+	}
+	if w.scrollViewport.YOffset < 0 {
+		w.scrollViewport.YOffset = 0
+	}
+}
+
+func (w *wizardModel) wizardHintsLine(inner int) string {
+	if w.step == StepReview {
+		if w.kind == wizardEdit {
+			return surfaceLine(inner, RunningStyle.Render("All set! Press [Enter] to save, [↑/b] to edit, [o] external editor, or [Esc] to cancel."))
+		}
+		return surfaceLine(inner, RunningStyle.Render("All set! Press [Enter] to create the instance, [↑/b] to edit, or [Esc] to cancel."))
+	}
+	if w.kind == wizardEdit {
+		return surfaceLine(inner, MutedStyle.Render("[↑↓] rows  [←→] options  [Enter] next  [o] editor  [Esc] cancel  (Runtime locked)"))
+	}
+	return surfaceLine(inner, MutedStyle.Render("[↑↓] rows  [←→] options  [Enter] next  [Esc] cancel"))
+}
+
+func (m *AppModel) viewWizardDock(innerWidth, dockHeight int) string {
+	w := &m.wizard
+	inputWidth := innerWidth - 14 - 1
+	if inputWidth < 8 {
+		inputWidth = 8
+	}
+	for i := range w.inputs {
+		w.inputs[i].Width = inputWidth
+	}
+	// Memory input is compact (e.g. "512M", "2G") and followed by recommendation text.
+	if len(w.inputs) > 5 {
+		w.inputs[5].Width = 10
+	}
+
+	titleText := "New Database Instance"
+	if w.kind == wizardEdit {
+		titleText = "Edit Instance"
+	}
+	title := surfaceLine(innerWidth, TitleStyle.Render(titleText))
+	hints := w.wizardHintsLine(innerWidth)
+	// Title + hints are fixed; body scrolls in the remaining rows.
+	scrollHeight := dockHeight - 2
+	if scrollHeight < 1 {
+		scrollHeight = 1
+	}
+
+	body := m.buildWizardBodyRows(innerWidth, inputWidth)
+	w.scrollViewport.Width = innerWidth
+	w.scrollViewport.Height = scrollHeight
+	w.scrollViewport.Style = lipgloss.NewStyle().Background(BgSurface)
+	w.scrollViewport.SetContent(body)
+	w.syncScrollToFocus()
+
+	return lipgloss.JoinVertical(lipgloss.Left, title, w.scrollViewport.View(), hints)
+}
+
+func (m *AppModel) buildWizardBodyRows(inner, inputWidth int) string {
+	w := &m.wizard
+
+	row := func(parts ...string) string {
+		return surfaceLine(inner, joinWithSurfaceGaps(parts, 1))
 	}
 
 	var content []string
-	content = append(content, TitleStyle.Render("New Database Instance"))
-	content = append(content, SeparatorStyle.Render(strings.Repeat("─", boxWidth-4)))
-	content = append(content, surfaceGap(1))
 
-	engineParts := []string{LabelStyle.Render("1. Engine:")}
-	if w.step == StepEngine {
-		for i, eng := range w.engines {
-			label := eng
-			if eng == "postgres" {
-				label = "Postgres"
-			} else if eng == "sqlserver" {
-				label = "SQL Server"
-			}
-			if i == w.selectedEngineIdx {
-				engineParts = append(engineParts, SelectedItemStyle.Render(fmt.Sprintf(" [%s] ", label)))
-			} else {
-				engineParts = append(engineParts, NormalItemStyle.Render(fmt.Sprintf(" %s ", label)))
-			}
-		}
-	} else {
-		engineParts = append(engineParts, ValueHighlightStyle.Render(w.engines[w.selectedEngineIdx]))
-	}
-	content = append(content, joinWithSurfaceGaps(engineParts, 1))
-
-	if w.step >= StepRuntime {
-		runtimeParts := []string{LabelStyle.Render("2. Runtime:")}
-		if w.step == StepRuntime {
-			for i, r := range w.runtimes {
-				if i == w.selectedRuntimeIdx {
-					runtimeParts = append(runtimeParts, SelectedItemStyle.Render(fmt.Sprintf(" [%s] ", r)))
+	if w.maxReached >= StepEngine {
+		if w.step == StepEngine {
+			parts := []string{LabelStyle.Render("1. Engine:")}
+			for i, eng := range w.engines {
+				label := engineDisplay(eng)
+				if i == w.selectedEngineIdx {
+					parts = append(parts, SelectedItemStyle.Render(fmt.Sprintf(" [%s] ", label)))
 				} else {
-					runtimeParts = append(runtimeParts, NormalItemStyle.Render(fmt.Sprintf(" %s ", r)))
+					parts = append(parts, NormalItemStyle.Render(fmt.Sprintf(" %s ", label)))
+				}
+			}
+			content = append(content, row(parts...))
+		} else {
+			content = append(content, row(LabelStyle.Render("1. Engine:"), ValueHighlightStyle.Render(engineDisplay(w.engines[w.selectedEngineIdx]))))
+		}
+	}
+
+	if w.maxReached >= StepRuntime {
+		runtimeLabel := runtimeDisplay(w.runtimes[w.selectedRuntimeIdx])
+		if w.runtimeLocked() {
+			content = append(content, m.wizardPreviewRow(inner, "2. Runtime:", runtimeLabel+" (locked)"))
+		} else if w.step == StepRuntime {
+			parts := []string{LabelStyle.Render("2. Runtime:")}
+			for i, r := range w.runtimes {
+				label := runtimeDisplay(r)
+				if i == w.selectedRuntimeIdx {
+					parts = append(parts, SelectedItemStyle.Render(fmt.Sprintf(" [%s] ", label)))
+				} else {
+					parts = append(parts, NormalItemStyle.Render(fmt.Sprintf(" %s ", label)))
+				}
+			}
+			content = append(content, row(parts...))
+		} else {
+			content = append(content, row(LabelStyle.Render("2. Runtime:"), ValueHighlightStyle.Render(runtimeLabel)))
+		}
+	}
+
+	if w.maxReached >= StepVersion {
+		engine := w.engines[w.selectedEngineIdx]
+		if w.step == StepVersion {
+			parts := []string{LabelStyle.Render("3. Version:")}
+			versions := w.availableVersions()
+			for i, ver := range versions {
+				disp := versionDisplay(engine, ver)
+				if i == w.selectedVersionIdx {
+					parts = append(parts, SelectedItemStyle.Render(fmt.Sprintf(" [%s] ", disp)))
+				} else {
+					parts = append(parts, NormalItemStyle.Render(fmt.Sprintf(" %s ", disp)))
+				}
+			}
+			content = append(content, row(parts...))
+			if engine == "sqlserver" {
+				var rawNote string
+				var isWarning bool
+				if w.selectedVersion() == core.SQLServerAzureEdge {
+					rawNote = "  ⚠ Note: Retired/frozen on ARM64 by Microsoft. No SQL Agent (512M-1G RAM)."
+					isWarning = true
+				} else {
+					rawNote = "  💡 Note: Full SQL Server 2022. Recommended 2G min RAM (Rosetta 2 on Apple Silicon)."
+					isWarning = false
+				}
+				if displayWidth(rawNote) > inner {
+					rawNote = truncateEnd(rawNote, inner)
+				}
+				if isWarning {
+					content = append(content, surfaceLine(inner, WarningStyle.Render(rawNote)))
+				} else {
+					content = append(content, surfaceLine(inner, MutedStyle.Render(rawNote)))
 				}
 			}
 		} else {
-			runtimeParts = append(runtimeParts, ValueHighlightStyle.Render(w.runtimes[w.selectedRuntimeIdx]))
+			content = append(content, row(LabelStyle.Render("3. Version:"), ValueHighlightStyle.Render(versionDisplay(engine, w.selectedVersion()))))
 		}
-		content = append(content, joinWithSurfaceGaps(runtimeParts, 1))
 	}
 
-	if w.step >= StepName {
-		content = append(content, lipgloss.JoinHorizontal(lipgloss.Top, LabelStyle.Render("3. Name:"), surfaceGap(1), wrapInputField(w.inputs[0].View())))
+	nameLabel := "3. Name:"
+	containerLabel := "4. Container:"
+	portLabel := "5. Port:"
+	dbLabel := "6. Database:"
+	passLabel := "7. Password:"
+	memLabel := "8. Memory:"
+	if w.maxReached >= StepVersion {
+		nameLabel = "4. Name:"
+		containerLabel = "5. Container:"
+		portLabel = "6. Port:"
+		dbLabel = "7. Database:"
+		passLabel = "8. Password:"
+		memLabel = "9. Memory:"
 	}
-	if w.step >= StepContainerName {
-		content = append(content, lipgloss.JoinHorizontal(lipgloss.Top, LabelStyle.Render("4. Container:"), surfaceGap(1), wrapInputField(w.inputs[1].View())))
+
+	if w.maxReached >= StepName {
+		content = append(content, m.wizardValueRow(inner, nameLabel, truncateEnd(w.inputs[0].Value(), inputWidth), 0, ""))
 	}
-	if w.step >= StepPort {
-		content = append(content, lipgloss.JoinHorizontal(lipgloss.Top, LabelStyle.Render("5. Port:"), surfaceGap(1), wrapInputField(w.inputs[2].View())))
+	if w.maxReached >= StepContainerName {
+		content = append(content, m.wizardValueRow(inner, containerLabel, truncateEnd(w.inputs[1].Value(), inputWidth), 1, ""))
 	}
-	if w.step >= StepDatabase {
-		content = append(content, lipgloss.JoinHorizontal(lipgloss.Top, LabelStyle.Render("6. Database:"), surfaceGap(1), wrapInputField(w.inputs[3].View())))
+	if w.maxReached >= StepPort {
+		content = append(content, m.wizardValueRow(inner, portLabel, truncateEnd(w.inputs[2].Value(), inputWidth), 2, ""))
 	}
-	if w.step >= StepVolume {
-		content = append(content, lipgloss.JoinHorizontal(lipgloss.Top, LabelStyle.Render("7. Volume:"), surfaceGap(1), wrapInputField(w.inputs[4].View())))
+	if w.maxReached >= StepDatabase {
+		content = append(content, m.wizardValueRow(inner, dbLabel, truncateEnd(w.inputs[3].Value(), inputWidth), 3, ""))
 	}
-	if w.step >= StepPassword {
-		content = append(content, lipgloss.JoinHorizontal(lipgloss.Top, LabelStyle.Render("8. Password:"), surfaceGap(1), wrapInputField(w.inputs[5].View())))
+	if w.maxReached >= StepDatabase {
+		content = append(content, m.wizardPreviewRow(inner, "Volume:", truncateEnd(w.derivedVolume(), inputWidth)))
 	}
-	if w.step >= StepMemoryLimit {
-		engine := w.engines[w.selectedEngineIdx]
+	if w.maxReached >= StepPassword {
+		content = append(content, m.wizardValueRow(inner, passLabel, truncateEnd(w.inputs[4].Value(), inputWidth), 4, ""))
+	}
+	if w.maxReached >= StepMemoryLimit {
 		recommendation := "(Recommended: 512M - 1G)"
-		if engine == "sqlserver" {
-			recommendation = "(Recommended: 2G min for MSSQL)"
+		if w.engines[w.selectedEngineIdx] == "sqlserver" {
+			if w.selectedVersion() == core.SQLServerAzureEdge {
+				recommendation = "(Recommended: 512M - 1G)"
+			} else {
+				recommendation = "(Recommended: 2G min for MSSQL)"
+			}
 		}
-		content = append(content, lipgloss.JoinHorizontal(lipgloss.Top, LabelStyle.Render("9. Memory:"), surfaceGap(1), wrapInputField(w.inputs[6].View()), surfaceGap(1), MutedStyle.Render(recommendation)))
+		content = append(content, m.wizardValueRow(inner, memLabel, truncateEnd(w.inputs[5].Value(), inputWidth), 5, recommendation))
 	}
 
-	if w.step == StepReview {
-		content = append(content, surfaceGap(1))
-		content = append(content, RunningStyle.Render("All set! Press [Enter] to create the instance or [Esc] to cancel."))
-	} else {
-		content = append(content, surfaceGap(1))
-		content = append(content, MutedStyle.Render("Press [Enter] to advance, [↑/↓] for options, [Esc] to cancel."))
+	if len(content) == 0 {
+		return surfaceBlankLine(inner)
 	}
+	return lipgloss.JoinVertical(lipgloss.Left, content...)
+}
 
+func (m *AppModel) viewWizard() string {
+	inner := screenInnerWidth(m.width)
+	_, rightWidth, _ := splitPanelWidths(inner)
+	contentHeight := mainContentHeight(m.height)
+	_, dockHeight := splitPanelHalfHeight(contentHeight - 1)
+	rightInner := panelInnerWidth(rightWidth)
+	dock := m.viewWizardDock(rightInner, dockHeight)
 	return ActivePanelStyle.
-		Width(boxWidth).
-		Render(lipgloss.JoinVertical(lipgloss.Left, content...))
+		Width(rightWidth).
+		Height(dockHeight + 2).
+		Render(dock)
 }
