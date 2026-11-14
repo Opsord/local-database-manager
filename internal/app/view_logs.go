@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"local-database-manager/internal/core"
+	"github.com/Opsord/local-database-manager/internal/core"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -250,9 +250,9 @@ func (m *AppModel) viewLogs() string {
 
 	var followBadge string
 	if m.logs.autoScroll {
-		followBadge = lipgloss.NewStyle().Foreground(SecondaryColor).Background(BgSurface).Bold(true).Render("[● FOLLOWING]")
+		followBadge = lipgloss.NewStyle().Foreground(SecondaryColor).Background(BgSurface).Bold(true).Render("[â— FOLLOWING]")
 	} else {
-		followBadge = lipgloss.NewStyle().Foreground(WarningColor).Background(BgSurface).Bold(true).Render("[⏸ PAUSED]")
+		followBadge = lipgloss.NewStyle().Foreground(WarningColor).Background(BgSurface).Bold(true).Render("[â¸ PAUSED]")
 	}
 
 	headerElements := []string{title, surfaceGap(2), followBadge}
@@ -267,7 +267,7 @@ func (m *AppModel) viewLogs() string {
 	}
 
 	header := lipgloss.JoinHorizontal(lipgloss.Top, headerElements...)
-	separator := SeparatorStyle.Render(strings.Repeat("─", panelWidth-4))
+	separator := SeparatorStyle.Render(strings.Repeat("â”€", panelWidth-4))
 
 	logContent := LogAreaStyle.
 		Width(panelWidth - 4).
@@ -288,7 +288,7 @@ func (m *AppModel) viewLogs() string {
 			lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true).Background(BgSurface).Render("  |  [f/Space] Follow"),
 			lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true).Background(BgSurface).Render("  |  [/] Filter"),
 			lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true).Background(BgSurface).Render("  |  [c] Copy"),
-			lipgloss.NewStyle().Foreground(FgText).Background(BgSurface).Render("  |  [↑/↓/PgUp/PgDn] Scroll"),
+			lipgloss.NewStyle().Foreground(FgText).Background(BgSurface).Render("  |  [â†‘/â†“/PgUp/PgDn] Scroll"),
 		)
 	}
 

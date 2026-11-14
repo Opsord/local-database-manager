@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"local-database-manager/internal/config"
-	"local-database-manager/internal/core"
+	"github.com/Opsord/local-database-manager/internal/config"
+	"github.com/Opsord/local-database-manager/internal/core"
 )
 
 type testRunnerStub struct {

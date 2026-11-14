@@ -1,4 +1,4 @@
-module local-database-manager
+module github.com/Opsord/local-database-manager
 
 go 1.22.0
 

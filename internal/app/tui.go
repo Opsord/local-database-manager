@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"local-database-manager/internal/config"
-	"local-database-manager/internal/core"
+	"github.com/Opsord/local-database-manager/internal/config"
+	"github.com/Opsord/local-database-manager/internal/core"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"

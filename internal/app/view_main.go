@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"local-database-manager/internal/core"
+	"github.com/Opsord/local-database-manager/internal/core"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -437,10 +437,10 @@ func (m *AppModel) deleteInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
 		}
 		health := m.runner.CheckEngineHealth(ctx, runtime)
 		if health == core.EngineNotInstalled {
-			return errMsg{fmt.Errorf("%w: %s — start is unavailable; cannot delete", core.ErrEngineNotInstalled, runtime)}
+			return errMsg{fmt.Errorf("%w: %s â€” start is unavailable; cannot delete", core.ErrEngineNotInstalled, runtime)}
 		}
 		if health == core.EngineOffline {
-			return errMsg{fmt.Errorf("%w: %s is offline — start it from Engines (e) before deleting", core.ErrEngineOffline, runtime)}
+			return errMsg{fmt.Errorf("%w: %s is offline â€” start it from Engines (e) before deleting", core.ErrEngineOffline, runtime)}
 		}
 		if err := m.runner.DownVolumes(ctx, &instCopy); err != nil {
 			return errMsg{err}
@@ -496,7 +496,7 @@ func mainShortcutEntries() []string {
 		return lipgloss.JoinHorizontal(lipgloss.Top, KeyStyle.Render(key), surfaceGap(1), KeyDescStyle.Render(desc))
 	}
 	return []string{
-		shortcut("[↑/↓]", "Nav"),
+		shortcut("[â†‘/â†“]", "Nav"),
 		shortcut("[Enter]", "Actions"),
 		shortcut("[/]", "Search"),
 		shortcut("[Space]", "Toggle"),
@@ -516,7 +516,7 @@ func actionShortcutEntries() []string {
 		return lipgloss.JoinHorizontal(lipgloss.Top, KeyStyle.Render(key), surfaceGap(1), KeyDescStyle.Render(desc))
 	}
 	return []string{
-		shortcut("[↑↓]", "Nav"),
+		shortcut("[â†‘â†“]", "Nav"),
 		shortcut("[Enter]", "Run"),
 		shortcut("[Esc]", "Close"),
 	}
@@ -527,8 +527,8 @@ func wizardShortcutEntries() []string {
 		return lipgloss.JoinHorizontal(lipgloss.Top, KeyStyle.Render(key), surfaceGap(1), KeyDescStyle.Render(desc))
 	}
 	return []string{
-		shortcut("[↑↓]", "Rows"),
-		shortcut("[←→]", "Options"),
+		shortcut("[â†‘â†“]", "Rows"),
+		shortcut("[â†â†’]", "Options"),
 		shortcut("[Enter]", "Next"),
 		shortcut("[b]", "Back"),
 		shortcut("[Esc]", "Cancel"),
@@ -540,7 +540,7 @@ func engineShortcutEntries() []string {
 		return lipgloss.JoinHorizontal(lipgloss.Top, KeyStyle.Render(key), surfaceGap(1), KeyDescStyle.Render(desc))
 	}
 	return []string{
-		shortcut("[↑↓]", "Nav"),
+		shortcut("[â†‘â†“]", "Nav"),
 		shortcut("[Enter]", "start/stop"),
 		shortcut("[y/n]", "confirm stop"),
 		shortcut("[Esc]", "Close"),

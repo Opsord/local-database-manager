@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"local-database-manager/internal/core"
+	"github.com/Opsord/local-database-manager/internal/core"
 
 	bubbleskey "github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -53,26 +53,26 @@ func truncateEnd(s string, max int) string {
 func statusIcon(status core.ContainerStatus) string {
 	switch status {
 	case core.StatusReady:
-		return RunningStyle.Render("●")
+		return RunningStyle.Render("â—")
 	case core.StatusStarting:
-		return StartingStyle.Render("◐")
+		return StartingStyle.Render("â—")
 	case core.StatusUnknown:
 		return UnknownStyle.Render("?")
 	default:
-		return StoppedStyle.Render("○")
+		return StoppedStyle.Render("â—‹")
 	}
 }
 
 func statusLabel(status core.ContainerStatus) string {
 	switch status {
 	case core.StatusReady:
-		return RunningStyle.Render("● RUNNING")
+		return RunningStyle.Render("â— RUNNING")
 	case core.StatusStarting:
-		return StartingStyle.Render("◐ STARTING")
+		return StartingStyle.Render("â— STARTING")
 	case core.StatusUnknown:
 		return UnknownStyle.Render("? UNKNOWN")
 	default:
-		return StoppedStyle.Render("○ STOPPED")
+		return StoppedStyle.Render("â—‹ STOPPED")
 	}
 }
 
@@ -182,7 +182,7 @@ func panelSeparator(width int) string {
 	if width < 1 {
 		width = 1
 	}
-	return SeparatorStyle.Width(width).Render(strings.Repeat("─", width))
+	return SeparatorStyle.Width(width).Render(strings.Repeat("â”€", width))
 }
 
 func surfaceBlankLine(width int) string {
@@ -396,13 +396,13 @@ func formatShortcutBar(width int, shortcuts []string) string {
 func statusIconPlain(status core.ContainerStatus) string {
 	switch status {
 	case core.StatusReady:
-		return "●"
+		return "â—"
 	case core.StatusStarting:
-		return "◐"
+		return "â—"
 	case core.StatusUnknown:
 		return "?"
 	default:
-		return "○"
+		return "â—‹"
 	}
 }
 

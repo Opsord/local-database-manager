@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"local-database-manager/internal/core"
+	"github.com/Opsord/local-database-manager/internal/core"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -618,7 +618,7 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					m.mode = ModeMain
 					if volumeChanged {
-						m.statusMsg = fmt.Sprintf("Saved (volume → %s; old volume kept). Restart container with new config? Press 'y' to confirm, 'n' to cancel", newVolume)
+						m.statusMsg = fmt.Sprintf("Saved (volume â†’ %s; old volume kept). Restart container with new config? Press 'y' to confirm, 'n' to cancel", newVolume)
 					} else {
 						m.statusMsg = "Saved. Restart container with new config? Press 'y' to confirm, 'n' to cancel"
 					}
@@ -929,14 +929,14 @@ func (w *wizardModel) syncScrollToFocus() {
 func (w *wizardModel) wizardHintsLine(inner int) string {
 	if w.step == StepReview {
 		if w.kind == wizardEdit {
-			return surfaceLine(inner, RunningStyle.Render("All set! Press [Enter] to save, [↑/b] to edit, [o] external editor, or [Esc] to cancel."))
+			return surfaceLine(inner, RunningStyle.Render("All set! Press [Enter] to save, [â†‘/b] to edit, [o] external editor, or [Esc] to cancel."))
 		}
-		return surfaceLine(inner, RunningStyle.Render("All set! Press [Enter] to create the instance, [↑/b] to edit, or [Esc] to cancel."))
+		return surfaceLine(inner, RunningStyle.Render("All set! Press [Enter] to create the instance, [â†‘/b] to edit, or [Esc] to cancel."))
 	}
 	if w.kind == wizardEdit {
-		return surfaceLine(inner, MutedStyle.Render("[↑↓] rows  [←→] options  [Enter] next  [o] editor  [Esc] cancel  (Runtime locked)"))
+		return surfaceLine(inner, MutedStyle.Render("[â†‘â†“] rows  [â†â†’] options  [Enter] next  [o] editor  [Esc] cancel  (Runtime locked)"))
 	}
-	return surfaceLine(inner, MutedStyle.Render("[↑↓] rows  [←→] options  [Enter] next  [Esc] cancel"))
+	return surfaceLine(inner, MutedStyle.Render("[â†‘â†“] rows  [â†â†’] options  [Enter] next  [Esc] cancel"))
 }
 
 func (m *AppModel) viewWizardDock(innerWidth, dockHeight int) string {
@@ -1039,10 +1039,10 @@ func (m *AppModel) buildWizardBodyRows(inner, inputWidth int) string {
 				var rawNote string
 				var isWarning bool
 				if w.selectedVersion() == core.SQLServerAzureEdge {
-					rawNote = "  ⚠ Note: Retired/frozen on ARM64 by Microsoft. No SQL Agent (512M-1G RAM)."
+					rawNote = "  âš  Note: Retired/frozen on ARM64 by Microsoft. No SQL Agent (512M-1G RAM)."
 					isWarning = true
 				} else {
-					rawNote = "  💡 Note: Full SQL Server 2022. Recommended 2G min RAM (Rosetta 2 on Apple Silicon)."
+					rawNote = "  ðŸ’¡ Note: Full SQL Server 2022. Recommended 2G min RAM (Rosetta 2 on Apple Silicon)."
 					isWarning = false
 				}
 				if displayWidth(rawNote) > inner {

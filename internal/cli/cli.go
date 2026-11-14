@@ -11,8 +11,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"local-database-manager/internal/config"
-	"local-database-manager/internal/core"
+	"github.com/Opsord/local-database-manager/internal/config"
+	"github.com/Opsord/local-database-manager/internal/core"
 )
 
 // Run executes a CLI subcommand and returns the process exit code.

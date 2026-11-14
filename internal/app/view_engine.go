@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"time"
 
-	"local-database-manager/internal/core"
+	"github.com/Opsord/local-database-manager/internal/core"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -193,7 +193,7 @@ func (m *AppModel) viewEngineDock(innerWidth, dockHeight int) string {
 	rows := m.engineMenuRows()
 
 	title := panelTitle("Container Engines", innerWidth)
-	hints := surfaceLine(innerWidth, MutedStyle.Render("Use [↑/↓] to navigate, [Enter] to start/stop, [y/n] to confirm stop, [Esc] to return."))
+	hints := surfaceLine(innerWidth, MutedStyle.Render("Use [â†‘/â†“] to navigate, [Enter] to start/stop, [y/n] to confirm stop, [Esc] to return."))
 
 	bodyHeight := dockHeight - 2
 	if bodyHeight < 1 {

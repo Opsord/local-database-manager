@@ -1,6 +1,40 @@
 # Local Database Manager 🗄️
 
-A lightweight, high-performance interactive Terminal User Interface (TUI) built in **Go** with **Bubble Tea / Charm** for centralized lifecycle management of local database containers running under **Docker** and **Podman**.
+[![Go Version](https://img.shields.io/github/go-mod/go-version/Opsord/local-database-manager)](go.mod)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![GitHub Release](https://img.shields.io/github/v/release/Opsord/local-database-manager)](https://github.com/Opsord/local-database-manager/releases)
+
+Stop juggling ports and loose `docker-compose.yml` files for local **PostgreSQL** and **SQL Server** databases.  
+A lightweight, high-performance interactive Terminal User Interface (TUI) and headless CLI built in **Go** with **Bubble Tea / Charm** for centralized lifecycle management across **Docker** and **Podman**.
+
+---
+
+## Screenshots
+
+### 1. Interactive Create Instance Wizard (`n`)
+![Create Instance Wizard](docs/screenshots/01-wizard.png)
+
+### 2. Container Engines Panel (`e`)
+![Start Podman Engine](docs/screenshots/02-engines.png)
+
+### 3. Instance Actions Menu (`Enter`)
+![Instance Actions Menu](docs/screenshots/03-actions.png)
+
+### 4. Active & Stopped Instances Overview
+![Active and Stopped Instances](docs/screenshots/04-instances.png)
+
+---
+
+## Quick Install
+
+### Option 1: `go install` (Recommended)
+```bash
+go install github.com/Opsord/local-database-manager/cmd/db-manager@latest
+```
+Run `db-manager` from any directory. On first launch, it automatically initializes `~/.db-manager` with default engine templates and `config.yml`.
+
+### Option 2: Precompiled Binaries
+Download the archive for Windows, macOS, or Linux from the [Releases](https://github.com/Opsord/local-database-manager/releases) page, extract it, and run `db-manager`.
 
 ---
 

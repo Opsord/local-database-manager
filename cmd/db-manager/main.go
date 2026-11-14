@@ -6,38 +6,46 @@ import (
 	"os"
 	"path/filepath"
 
-	"local-database-manager/internal/app"
-	"local-database-manager/internal/cli"
-	"local-database-manager/internal/config"
-	"local-database-manager/internal/logger"
+	dbmanager "github.com/Opsord/local-database-manager"
+	"github.com/Opsord/local-database-manager/internal/app"
+	"github.com/Opsord/local-database-manager/internal/cli"
+	"github.com/Opsord/local-database-manager/internal/config"
+	"github.com/Opsord/local-database-manager/internal/logger"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func findProjectRoot() string {
-	// 1. Current working directory
+func findProjectRoot() (string, error) {
+	// 1. Current working directory (cloned repo or local workspace)
 	cwd, err := os.Getwd()
-	if err == nil {
-		if hasEnginesAndInstances(cwd) {
-			return cwd
-		}
+	if err == nil && hasEnginesAndInstances(cwd) {
+		return cwd, nil
 	}
 
-	// 2. Executable directory
+	// 2. Executable directory (extracted release archive)
 	exePath, err := os.Executable()
 	if err == nil {
 		exeDir := filepath.Dir(exePath)
 		if hasEnginesAndInstances(exeDir) {
-			return exeDir
+			return exeDir, nil
 		}
 		// Check parent of exe dir (e.g. if binary is in bin/ or cmd/db-manager/)
 		parentDir := filepath.Dir(exeDir)
 		if hasEnginesAndInstances(parentDir) {
-			return parentDir
+			return parentDir, nil
 		}
 	}
 
-	return cwd
+	// 3. Standalone / `go install` fallback: ~/.db-manager
+	homeDir, homeErr := os.UserHomeDir()
+	if homeErr != nil {
+		return cwd, fmt.Errorf("resolve user home directory: %w", homeErr)
+	}
+	workspaceDir := filepath.Join(homeDir, ".db-manager")
+	if err := dbmanager.EnsureWorkspace(workspaceDir); err != nil {
+		return workspaceDir, fmt.Errorf("initialize workspace %s: %w", workspaceDir, err)
+	}
+	return workspaceDir, nil
 }
 
 func hasEnginesAndInstances(dir string) bool {
@@ -49,7 +57,11 @@ func hasEnginesAndInstances(dir string) bool {
 }
 
 func main() {
-	projectRoot := findProjectRoot()
+	projectRoot, rootErr := findProjectRoot()
+	if rootErr != nil {
+		fmt.Fprintf(os.Stderr, "Error initializing workspace: %v\n", rootErr)
+		os.Exit(1)
+	}
 
 	closeLogger, logErr := logger.Init(projectRoot)
 	if logErr == nil {
