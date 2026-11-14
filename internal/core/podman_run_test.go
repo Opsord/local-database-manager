@@ -39,8 +39,36 @@ func TestBuildPodmanRunArgs_Postgres(t *testing.T) {
 			t.Fatalf("missing %q in %q", want, joined)
 		}
 	}
+	if strings.Contains(joined, "PGDATA=") {
+		t.Fatalf("postgres 18 should keep default PGDATA, got %q", joined)
+	}
 	if strings.Contains(joined, "compose") {
 		t.Fatal("must not use compose")
+	}
+}
+
+func TestBuildPodmanRunArgs_Postgres16SetsPGDATA(t *testing.T) {
+	t.Parallel()
+	r := NewRunner(`C:\proj`)
+	inst := &DatabaseInstance{
+		EngineType:    "postgres",
+		Runtime:       "podman",
+		ContainerName: "pg_legacy",
+		Port:          5435,
+		Database:      "legacy_db",
+		User:          "postgres",
+		Password:      "postgres",
+		Schema:        "public",
+		Version:       "16",
+		Volume:        "pgdata_legacy_16",
+	}
+	args, err := r.buildPodmanRunArgs(inst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-e PGDATA=/var/lib/postgresql/pgdata") {
+		t.Fatalf("postgres 16 must set PGDATA=/var/lib/postgresql/pgdata, got %q", joined)
 	}
 }
 

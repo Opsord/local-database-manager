@@ -9,6 +9,12 @@ import (
 	"time"
 )
 
+// ContainerStats holds metrics for a container.
+type ContainerStats struct {
+	CPU    string
+	Memory string
+}
+
 // RuntimeProvider defines the operations that a container engine (Docker, Podman) must implement.
 type RuntimeProvider interface {
 	Name() string
@@ -19,6 +25,7 @@ type RuntimeProvider interface {
 	Stop(ctx context.Context, inst *DatabaseInstance) error
 	DownVolumes(ctx context.Context, inst *DatabaseInstance) error
 	CheckStatus(ctx context.Context, inst *DatabaseInstance) ContainerStatus
+	GetStats(ctx context.Context, inst *DatabaseInstance) ContainerStats
 	GetMemoryUsage(ctx context.Context, inst *DatabaseInstance) string
 	LogsCommand(inst *DatabaseInstance) *exec.Cmd
 }
@@ -149,6 +156,10 @@ func (u *unsupportedProvider) DownVolumes(ctx context.Context, inst *DatabaseIns
 
 func (u *unsupportedProvider) CheckStatus(ctx context.Context, inst *DatabaseInstance) ContainerStatus {
 	return StatusStopped
+}
+
+func (u *unsupportedProvider) GetStats(ctx context.Context, inst *DatabaseInstance) ContainerStats {
+	return ContainerStats{CPU: "-", Memory: "-"}
 }
 
 func (u *unsupportedProvider) GetMemoryUsage(ctx context.Context, inst *DatabaseInstance) string {

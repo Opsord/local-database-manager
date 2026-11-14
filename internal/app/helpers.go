@@ -237,6 +237,7 @@ func plainDetailFields(inst *core.DatabaseInstance, panelWidth int) []plainDetai
 	fields = append(fields, []plainDetailField{
 		{"Container:", truncateEnd(inst.ContainerName, panelWidth-20)},
 		{"Status:", statusDisplayPlain(inst.Status)},
+		{"CPU:", inst.CPUUsage},
 		{"Memory:", memFormatted},
 		{"Database:", inst.Database},
 		{"Port:", fmt.Sprintf("%d", inst.Port)},

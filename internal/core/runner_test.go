@@ -54,32 +54,6 @@ func TestRunner_BuildComposeArgs(t *testing.T) {
 	}
 }
 
-func TestRunner_PodmanCompose(t *testing.T) {
-	t.Parallel()
-	root := "/test/app"
-	runner := NewRunner(root)
-
-	inst := &DatabaseInstance{
-		Name:          "local_pod",
-		EngineType:    "postgres",
-		Runtime:       "podman",
-		ProjectName:   "pod-calendar",
-		EnvFilePath:   "/test/app/instances/local_pod.env",
-		ContainerName: "pod-calendar",
-	}
-
-	bin, args := runner.BuildComposeArgs(inst, "down")
-	if bin != "podman" {
-		t.Errorf("expected binary 'podman', got '%s'", bin)
-	}
-
-	joined := strings.Join(args, " ")
-	expectedComposeFile := filepath.Join(root, "engines", "postgres", "podman-compose.yml")
-	if !strings.Contains(joined, expectedComposeFile) {
-		t.Errorf("expected compose file '%s', got '%s'", expectedComposeFile, joined)
-	}
-}
-
 func TestRunner_CheckEngineHealth_NotInstalled(t *testing.T) {
 	t.Parallel()
 	runner := NewRunner("/test/app")
@@ -167,17 +141,6 @@ func TestWindowsNamedPipeToDOCKERHost(t *testing.T) {
 	}
 	if windowsNamedPipeToDOCKERHost(`C:\not\a\pipe`) != "" {
 		t.Fatal("non-pipe path should yield empty host")
-	}
-}
-
-func TestIsPodmanComposePipeError(t *testing.T) {
-	t.Parallel()
-	stderr := `unable to get image 'postgres:18': error during connect: Get "http://%2F%2F.%2Fpipe%2Fpodman-machine-default/v1.55/images/postgres:18/json": EOF`
-	if !isPodmanComposePipeError(stderr) {
-		t.Fatal("expected pipe EOF detection")
-	}
-	if isPodmanComposePipeError("image not found") {
-		t.Fatal("should not match unrelated errors")
 	}
 }
 

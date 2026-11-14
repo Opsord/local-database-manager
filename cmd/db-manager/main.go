@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"local-database-manager/internal/app"
+	"local-database-manager/internal/cli"
 	"local-database-manager/internal/config"
 	"local-database-manager/internal/logger"
 
@@ -63,6 +64,10 @@ func main() {
 		}
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
 		os.Exit(1)
+	}
+
+	if len(os.Args) > 1 {
+		os.Exit(cli.Run(projectRoot, cfg, os.Args[1:]))
 	}
 
 	appModel := app.NewApp(projectRoot, cfg)

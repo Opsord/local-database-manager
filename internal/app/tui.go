@@ -31,7 +31,12 @@ const (
 type clearStatusMsg struct{}
 
 type actionDoneMsg struct {
-	msg string
+	msg         string
+	instName    string
+	hasUpdate   bool
+	status      core.ContainerStatus
+	cpuUsage    string
+	memoryUsage string
 }
 
 type deleteDoneMsg struct {
@@ -207,8 +212,11 @@ func (m *AppModel) reloadInstancesCmd() tea.Cmd {
 				defer wg.Done()
 				i.Status = m.runner.CheckStatus(ctx, i)
 				if i.Status != core.StatusStopped {
-					i.MemoryUsage = m.runner.GetMemoryUsage(ctx, i)
+					stats := m.runner.GetStats(ctx, i)
+					i.CPUUsage = stats.CPU
+					i.MemoryUsage = stats.Memory
 				} else {
+					i.CPUUsage = "-"
 					i.MemoryUsage = "-"
 				}
 			}(inst)
@@ -293,6 +301,16 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.checkEngineHealthCmd(true)
 
 	case actionDoneMsg:
+		if msg.hasUpdate {
+			for _, inst := range m.instances {
+				if inst.Name == msg.instName {
+					inst.Status = msg.status
+					inst.CPUUsage = msg.cpuUsage
+					inst.MemoryUsage = msg.memoryUsage
+					break
+				}
+			}
+		}
 		m.statusMsg = msg.msg
 		m.statusIsErr = false
 		return m, tea.Tick(4*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })

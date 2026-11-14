@@ -35,6 +35,7 @@ type InstanceRunner interface {
 	Stop(ctx context.Context, inst *DatabaseInstance) error
 	DownVolumes(ctx context.Context, inst *DatabaseInstance) error
 	CheckStatus(ctx context.Context, inst *DatabaseInstance) ContainerStatus
+	GetStats(ctx context.Context, inst *DatabaseInstance) ContainerStats
 	GetMemoryUsage(ctx context.Context, inst *DatabaseInstance) string
 	LogsCommand(inst *DatabaseInstance) *exec.Cmd
 }
@@ -126,6 +127,11 @@ func (r *Runner) CheckStatus(ctx context.Context, inst *DatabaseInstance) Contai
 	return r.providerFor(inst.Runtime).CheckStatus(ctx, inst)
 }
 
+// GetStats retrieves CPU and memory consumption stats for the container.
+func (r *Runner) GetStats(ctx context.Context, inst *DatabaseInstance) ContainerStats {
+	return r.providerFor(inst.Runtime).GetStats(ctx, inst)
+}
+
 // GetMemoryUsage retrieves memory consumption stats for the container.
 func (r *Runner) GetMemoryUsage(ctx context.Context, inst *DatabaseInstance) string {
 	return r.providerFor(inst.Runtime).GetMemoryUsage(ctx, inst)
@@ -141,15 +147,9 @@ func (r *Runner) GetComposeFile(inst *DatabaseInstance) string {
 	if p, ok := r.providerFor(inst.Runtime).(*DockerProvider); ok {
 		return p.GetComposeFile(inst)
 	}
-	if p, ok := r.providerFor(inst.Runtime).(*PodmanProvider); ok {
-		return p.GetComposeFile(inst)
-	}
 	engineFolder := inst.EngineType
 	if engineFolder == "sqlserver" {
 		engineFolder = "sql-server"
-	}
-	if inst.Runtime == "podman" {
-		return filepath.Join(r.ProjectRoot, "engines", engineFolder, "podman-compose.yml")
 	}
 	return filepath.Join(r.ProjectRoot, "engines", engineFolder, "docker-compose.yml")
 }
@@ -157,9 +157,6 @@ func (r *Runner) GetComposeFile(inst *DatabaseInstance) string {
 // BuildComposeArgs returns the binary name and base command arguments.
 func (r *Runner) BuildComposeArgs(inst *DatabaseInstance, extraArgs ...string) (string, []string) {
 	if p, ok := r.providerFor(inst.Runtime).(*DockerProvider); ok {
-		return p.BuildComposeArgs(inst, extraArgs...)
-	}
-	if p, ok := r.providerFor(inst.Runtime).(*PodmanProvider); ok {
 		return p.BuildComposeArgs(inst, extraArgs...)
 	}
 	binary := inst.Runtime
@@ -186,10 +183,6 @@ func (r *Runner) buildPodmanRunArgs(inst *DatabaseInstance) ([]string, error) {
 		return p.buildPodmanRunArgs(inst)
 	}
 	return nil, fmt.Errorf("podman provider not available")
-}
-
-func (r *Runner) startDockerEngine(ctx context.Context) error {
-	return r.providerFor("docker").StartDaemon(ctx)
 }
 
 func (r *Runner) stopDockerEngine(ctx context.Context) error {

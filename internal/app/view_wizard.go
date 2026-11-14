@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -52,6 +53,9 @@ type wizardModel struct {
 	sourceContainerName string
 	sourceEngine        string
 	sourceVolume        string
+	sourceUser          string
+	sourceSchema        string
+	sourceRawEnv        map[string]string
 	wasRunning          bool
 
 	step wizardStep
@@ -233,6 +237,14 @@ func newEditWizardModel(projectRoot, instancesDir string, existing []*core.Datab
 	w.sourceContainerName = inst.ContainerName
 	w.sourceEngine = inst.EngineType
 	w.sourceVolume = inst.Volume
+	w.sourceUser = inst.User
+	w.sourceSchema = inst.Schema
+	if len(inst.RawEnv) > 0 {
+		w.sourceRawEnv = make(map[string]string, len(inst.RawEnv))
+		for k, v := range inst.RawEnv {
+			w.sourceRawEnv[k] = v
+		}
+	}
 	w.wasRunning = inst.Status == core.StatusReady || inst.Status == core.StatusStarting
 
 	for i, e := range w.engines {
@@ -743,6 +755,16 @@ func (w *wizardModel) saveInstance() error {
 
 	var content string
 	if engine == "postgres" {
+		user := "postgres"
+		schema := "public"
+		if w.kind == wizardEdit && engine == w.sourceEngine {
+			if strings.TrimSpace(w.sourceUser) != "" {
+				user = w.sourceUser
+			}
+			if strings.TrimSpace(w.sourceSchema) != "" {
+				schema = w.sourceSchema
+			}
+		}
 		version := w.selectedVersion()
 		content = fmt.Sprintf(`ENGINE=postgres
 RUNTIME=%s
@@ -752,14 +774,18 @@ COMPOSE_PROJECT_NAME=%s
 MEMORY_LIMIT=%s
 
 POSTGRES_PORT=%s
-POSTGRES_USER=postgres
+POSTGRES_USER=%s
 POSTGRES_PASSWORD=%s
 POSTGRES_DB=%s
-POSTGRES_SCHEMA=public
+POSTGRES_SCHEMA=%s
 POSTGRES_VERSION=%s
 POSTGRES_VOLUME=%s
-`, runtime, containerName, containerName, memLimit, port, pass, db, version, volume)
+`, runtime, containerName, containerName, memLimit, port, user, pass, db, schema, version, volume)
 	} else {
+		schema := "dbo"
+		if w.kind == wizardEdit && engine == w.sourceEngine && strings.TrimSpace(w.sourceSchema) != "" {
+			schema = w.sourceSchema
+		}
 		version := w.selectedVersion()
 		image := core.SQLServerImageForVersion(version)
 		content = fmt.Sprintf(`ENGINE=sqlserver
@@ -772,11 +798,31 @@ MEMORY_LIMIT=%s
 SQLSERVER_PORT=%s
 SA_PASSWORD=%s
 SQLSERVER_DB=%s
-SQLSERVER_SCHEMA=dbo
+SQLSERVER_SCHEMA=%s
 SQLSERVER_VOLUME=%s
 SQLSERVER_VERSION=%s
 SQLSERVER_IMAGE=%s
-`, runtime, containerName, containerName, memLimit, port, pass, db, volume, version, image)
+`, runtime, containerName, containerName, memLimit, port, pass, db, schema, volume, version, image)
+	}
+
+	if w.kind == wizardEdit && len(w.sourceRawEnv) > 0 {
+		managedKeys := map[string]bool{
+			"ENGINE": true, "RUNTIME": true, "CONTAINER_NAME": true, "COMPOSE_PROJECT_NAME": true, "MEMORY_LIMIT": true,
+			"POSTGRES_PORT": true, "POSTGRES_USER": true, "POSTGRES_PASSWORD": true, "POSTGRES_DB": true,
+			"POSTGRES_SCHEMA": true, "POSTGRES_VERSION": true, "POSTGRES_VOLUME": true,
+			"SQLSERVER_PORT": true, "SA_PASSWORD": true, "MSSQL_SA_PASSWORD": true, "SQLSERVER_DB": true, "MSSQL_DB": true,
+			"SQLSERVER_SCHEMA": true, "SQLSERVER_VOLUME": true, "SQLSERVER_VERSION": true, "SQLSERVER_IMAGE": true,
+		}
+		var extras []string
+		for k, v := range w.sourceRawEnv {
+			if !managedKeys[k] {
+				extras = append(extras, fmt.Sprintf("%s=%s", k, formatEnvValue(v)))
+			}
+		}
+		if len(extras) > 0 {
+			sort.Strings(extras)
+			content += "\n" + strings.Join(extras, "\n") + "\n"
+		}
 	}
 
 	newPath := filepath.Join(w.instancesDir, fmt.Sprintf("%s.env", name))
@@ -796,6 +842,20 @@ SQLSERVER_IMAGE=%s
 		}
 	}
 	return nil
+}
+
+func formatEnvValue(v string) string {
+	needsQuotes := strings.Contains(v, "#") || v != strings.TrimSpace(v)
+	if !needsQuotes {
+		return v
+	}
+	if !strings.Contains(v, `"`) {
+		return `"` + v + `"`
+	}
+	if !strings.Contains(v, `'`) {
+		return `'` + v + `'`
+	}
+	return v
 }
 
 func (m *AppModel) wizardPreviewRow(inner int, label, value string) string {

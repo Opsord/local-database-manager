@@ -63,21 +63,23 @@ func TestRuntimeProvider_Podman(t *testing.T) {
 		ProjectName:   "sql-proj",
 		EnvFilePath:   "/test/app/instances/sql_test.env",
 		ContainerName: "sql-proj-c",
+		Port:          1433,
+		Database:      "app_db",
+		Schema:        "dbo",
 	}
 
-	composeFile := provider.GetComposeFile(inst)
-	expectedCompose := filepath.Join(root, "engines", "sql-server", "podman-compose.yml")
-	if composeFile != expectedCompose {
-		t.Fatalf("expected compose file %q, got %q", expectedCompose, composeFile)
-	}
-
-	bin, args := provider.BuildComposeArgs(inst, "down")
-	if bin != "podman" {
-		t.Fatalf("expected binary 'podman', got %q", bin)
+	args, err := provider.buildPodmanRunArgs(inst)
+	if err != nil {
+		t.Fatalf("buildPodmanRunArgs error: %v", err)
 	}
 	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "-p sql-proj") || !strings.Contains(joined, "down") {
-		t.Fatalf("unexpected compose args: %s", joined)
+	if !strings.Contains(joined, "--name sql-proj-c") || !strings.Contains(joined, "127.0.0.1:1433:1433") {
+		t.Fatalf("unexpected podman run args: %s", joined)
+	}
+
+	logsCmd := provider.LogsCommand(inst)
+	if !strings.Contains(strings.Join(logsCmd.Args, " "), "logs --tail=100 -f sql-proj-c") {
+		t.Fatalf("unexpected logs args: %v", logsCmd.Args)
 	}
 }
 
@@ -116,6 +118,11 @@ func TestRuntimeProvider_Unsupported(t *testing.T) {
 
 	if u.GetMemoryUsage(ctx, inst) != "-" {
 		t.Fatalf("expected '-'")
+	}
+
+	stats := u.GetStats(ctx, inst)
+	if stats.CPU != "-" || stats.Memory != "-" {
+		t.Fatalf("expected '-' for cpu and memory, got %+v", stats)
 	}
 }
 

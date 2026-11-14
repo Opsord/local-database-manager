@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -114,6 +115,11 @@ func (p *DockerProvider) Start(ctx context.Context, inst *DatabaseInstance) erro
 
 	bin, args := p.BuildComposeArgs(inst, "up", "-d")
 	cmd := exec.CommandContext(cmdCtx, bin, args...)
+	if inst.EngineType == "postgres" && NormalizePostgresVersion(inst.Version) != "18" {
+		if inst.RawEnv == nil || strings.TrimSpace(inst.RawEnv["POSTGRES_PGDATA"]) == "" {
+			cmd.Env = append(os.Environ(), "POSTGRES_PGDATA=/var/lib/postgresql/pgdata")
+		}
+	}
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 
@@ -122,7 +128,6 @@ func (p *DockerProvider) Start(ctx context.Context, inst *DatabaseInstance) erro
 		return ParseComposeError(errBuf.String(), err)
 	}
 
-	inst.Status = StatusStarting
 	return nil
 }
 
@@ -143,8 +148,6 @@ func (p *DockerProvider) Stop(ctx context.Context, inst *DatabaseInstance) error
 		return ParseComposeError(errBuf.String(), err)
 	}
 
-	inst.Status = StatusStopped
-	inst.MemoryUsage = "-"
 	return nil
 }
 
@@ -165,8 +168,6 @@ func (p *DockerProvider) DownVolumes(ctx context.Context, inst *DatabaseInstance
 		return ParseComposeError(errBuf.String(), err)
 	}
 
-	inst.Status = StatusStopped
-	inst.MemoryUsage = "-"
 	return nil
 }
 
@@ -198,28 +199,44 @@ func (p *DockerProvider) CheckStatus(ctx context.Context, inst *DatabaseInstance
 	return StatusStopped
 }
 
-// GetMemoryUsage gets container memory stats.
-func (p *DockerProvider) GetMemoryUsage(ctx context.Context, inst *DatabaseInstance) string {
+// GetStats retrieves CPU and memory consumption stats for the container.
+func (p *DockerProvider) GetStats(ctx context.Context, inst *DatabaseInstance) ContainerStats {
 	if inst.Status == StatusStopped {
-		return "-"
+		return ContainerStats{CPU: "-", Memory: "-"}
 	}
 
 	cmdCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "docker", "stats", "--no-stream", "--format", "{{.MemUsage}}", inst.ContainerName)
+	cmd := exec.CommandContext(cmdCtx, "docker", "stats", "--no-stream", "--format", "{{.CPUPerc}}\t{{.MemUsage}}", inst.ContainerName)
 	var outBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 
 	if err := cmd.Run(); err != nil {
-		return "-"
+		return ContainerStats{CPU: "-", Memory: "-"}
 	}
 
 	res := strings.TrimSpace(outBuf.String())
 	if res == "" {
-		return "-"
+		return ContainerStats{CPU: "-", Memory: "-"}
 	}
-	return res
+
+	parts := strings.Split(res, "\t")
+	cpu := "-"
+	mem := "-"
+	if len(parts) > 0 && strings.TrimSpace(parts[0]) != "" {
+		cpu = strings.TrimSpace(parts[0])
+	}
+	if len(parts) > 1 && strings.TrimSpace(parts[1]) != "" {
+		mem = strings.TrimSpace(parts[1])
+	}
+
+	return ContainerStats{CPU: cpu, Memory: mem}
+}
+
+// GetMemoryUsage gets container memory stats.
+func (p *DockerProvider) GetMemoryUsage(ctx context.Context, inst *DatabaseInstance) string {
+	return p.GetStats(ctx, inst).Memory
 }
 
 // LogsCommand returns the command for streaming container logs.

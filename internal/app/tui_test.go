@@ -53,6 +53,9 @@ func (s *stubRunner) DownVolumes(context.Context, *core.DatabaseInstance) error 
 func (s *stubRunner) CheckStatus(context.Context, *core.DatabaseInstance) core.ContainerStatus {
 	return core.StatusStopped
 }
+func (s *stubRunner) GetStats(context.Context, *core.DatabaseInstance) core.ContainerStats {
+	return core.ContainerStats{CPU: "-", Memory: "-"}
+}
 func (s *stubRunner) GetMemoryUsage(context.Context, *core.DatabaseInstance) string {
 	return "-"
 }

@@ -129,32 +129,6 @@ func (p *PodmanProvider) StopDaemon(ctx context.Context) error {
 	return waitUntilEngineOffline(cmdCtx, p.Health, "podman")
 }
 
-// GetComposeFile resolves the podman-compose.yml path.
-func (p *PodmanProvider) GetComposeFile(inst *DatabaseInstance) string {
-	engineFolder := inst.EngineType
-	if engineFolder == "sqlserver" {
-		engineFolder = "sql-server"
-	}
-	return filepath.Join(p.projectRoot, "engines", engineFolder, "podman-compose.yml")
-}
-
-// BuildComposeArgs returns the binary and args for a compose command.
-func (p *PodmanProvider) BuildComposeArgs(inst *DatabaseInstance, extraArgs ...string) (string, []string) {
-	composeFile := p.GetComposeFile(inst)
-	projectName := inst.ProjectName
-	if projectName == "" {
-		projectName = inst.Name
-	}
-	args := []string{
-		"compose",
-		"-p", projectName,
-		"-f", composeFile,
-		"--env-file", inst.EnvFilePath,
-	}
-	args = append(args, extraArgs...)
-	return "podman", args
-}
-
 // Start launches the database container via rootless podman run.
 func (p *PodmanProvider) Start(ctx context.Context, inst *DatabaseInstance) error {
 	health := p.Health(ctx)
@@ -201,14 +175,12 @@ func (p *PodmanProvider) Start(ctx context.Context, inst *DatabaseInstance) erro
 			if retryErr := retryCmd.Run(); retryErr != nil {
 				return ParseComposeError(retryErrBuf.String(), retryErr)
 			}
-			inst.Status = StatusStarting
 			return nil
 		}
 		slog.Error("Failed to start Podman instance", "name", inst.Name, "error", err, "stderr", stderr)
 		return ParseComposeError(stderr, err)
 	}
 
-	inst.Status = StatusStarting
 	return nil
 }
 
@@ -224,8 +196,6 @@ func (p *PodmanProvider) Stop(ctx context.Context, inst *DatabaseInstance) error
 		return err
 	}
 
-	inst.Status = StatusStopped
-	inst.MemoryUsage = "-"
 	return nil
 }
 
@@ -241,8 +211,6 @@ func (p *PodmanProvider) DownVolumes(ctx context.Context, inst *DatabaseInstance
 		return err
 	}
 
-	inst.Status = StatusStopped
-	inst.MemoryUsage = "-"
 	return nil
 }
 
@@ -269,28 +237,44 @@ func (p *PodmanProvider) CheckStatus(ctx context.Context, inst *DatabaseInstance
 	return StatusStopped
 }
 
-// GetMemoryUsage returns container memory usage stats.
-func (p *PodmanProvider) GetMemoryUsage(ctx context.Context, inst *DatabaseInstance) string {
+// GetStats returns container CPU and memory usage stats.
+func (p *PodmanProvider) GetStats(ctx context.Context, inst *DatabaseInstance) ContainerStats {
 	if inst.Status == StatusStopped {
-		return "-"
+		return ContainerStats{CPU: "-", Memory: "-"}
 	}
 
 	cmdCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "podman", "stats", "--no-stream", "--format", "{{.MemUsage}}", inst.ContainerName)
+	cmd := exec.CommandContext(cmdCtx, "podman", "stats", "--no-stream", "--format", "{{.CPUPerc}}\t{{.MemUsage}}", inst.ContainerName)
 	var outBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 
 	if err := cmd.Run(); err != nil {
-		return "-"
+		return ContainerStats{CPU: "-", Memory: "-"}
 	}
 
 	res := strings.TrimSpace(outBuf.String())
 	if res == "" {
-		return "-"
+		return ContainerStats{CPU: "-", Memory: "-"}
 	}
-	return res
+
+	parts := strings.Split(res, "\t")
+	cpu := "-"
+	mem := "-"
+	if len(parts) > 0 && strings.TrimSpace(parts[0]) != "" {
+		cpu = strings.TrimSpace(parts[0])
+	}
+	if len(parts) > 1 && strings.TrimSpace(parts[1]) != "" {
+		mem = strings.TrimSpace(parts[1])
+	}
+
+	return ContainerStats{CPU: cpu, Memory: mem}
+}
+
+// GetMemoryUsage returns container memory usage stats.
+func (p *PodmanProvider) GetMemoryUsage(ctx context.Context, inst *DatabaseInstance) string {
+	return p.GetStats(ctx, inst).Memory
 }
 
 // LogsCommand prepares a command for streaming container logs.
@@ -434,6 +418,11 @@ func (p *PodmanProvider) buildPodmanRunArgs(inst *DatabaseInstance) ([]string, e
 			"-e", "POSTGRES_USER="+inst.User,
 			"-e", "POSTGRES_PASSWORD="+inst.Password,
 			"-e", "POSTGRES_SCHEMA="+inst.Schema,
+		)
+		if version != "18" {
+			args = append(args, "-e", "PGDATA=/var/lib/postgresql/pgdata")
+		}
+		args = append(args,
 			"-p", fmt.Sprintf("127.0.0.1:%d:5432", inst.Port),
 			"-v", vol+":/var/lib/postgresql",
 			"-v", initDir+":/docker-entrypoint-initdb.d:ro",
@@ -614,77 +603,8 @@ func (p *PodmanProvider) podmanMachineDOCKERHost(ctx context.Context) (string, e
 	return host, nil
 }
 
-func (p *PodmanProvider) probeDOCKERHost(ctx context.Context, dockerHost string) bool {
-	bin, err := exec.LookPath("docker")
-	if err != nil {
-		return false
-	}
-	cmd := exec.CommandContext(ctx, bin, "version", "--format", "{{.Server.APIVersion}}")
-	cmd.Env = append(os.Environ(), "DOCKER_HOST="+dockerHost)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	return cmd.Run() == nil
-}
-
-func (p *PodmanProvider) podmanComposeAPIReady(ctx context.Context) bool {
-	if runtime.GOOS != "windows" {
-		return true
-	}
-	host, err := p.podmanMachineDOCKERHost(ctx)
-	if err != nil {
-		return false
-	}
-	return p.probeDOCKERHost(ctx, host)
-}
-
-func (p *PodmanProvider) ensurePodmanComposeReady(ctx context.Context) error {
-	if runtime.GOOS != "windows" {
-		return nil
-	}
-	if _, err := exec.LookPath("docker"); err != nil {
-		return nil
-	}
-	if p.podmanComposeAPIReady(ctx) {
-		return nil
-	}
-	_, _ = p.execPodmanMachine(ctx, "stop")
-	stderr, err := p.execPodmanMachine(ctx, "start")
-	if err != nil && !isPodmanMachineAlreadyRunning(stderr) {
-		if p.Health(ctx) != EngineOnline {
-			return fmt.Errorf("%w: refresh podman machine for compose API: %v (%s)", ErrEngineStartFailed, err, stderr)
-		}
-	}
-	_ = p.repairPodmanDefaultConnection(ctx)
-
-	deadline, ok := ctx.Deadline()
-	if !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, engineStartTimeout)
-		defer cancel()
-		deadline, _ = ctx.Deadline()
-	}
-	for {
-		if p.podmanComposeAPIReady(ctx) {
-			return nil
-		}
-		if time.Now().After(deadline) || ctx.Err() != nil {
-			return fmt.Errorf("%w: podman Docker API pipe not ready (compose needs npipe forwarding)", ErrEngineStartFailed)
-		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("%w: podman Docker API pipe not ready (compose needs npipe forwarding)", ErrEngineStartFailed)
-		case <-time.After(enginePollInterval):
-		}
-	}
-}
-
 func isPodmanMachineAlreadyRunning(stderr string) bool {
 	return strings.Contains(strings.ToLower(stderr), "already running")
-}
-
-func isPodmanComposePipeError(stderr string) bool {
-	lower := strings.ToLower(stderr)
-	return strings.Contains(lower, "pipe") && (strings.Contains(lower, "eof") || strings.Contains(lower, "error during connect"))
 }
 
 func windowsNamedPipeToDOCKERHost(pipePath string) string {

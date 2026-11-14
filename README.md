@@ -11,13 +11,14 @@ A lightweight, high-performance interactive Terminal User Interface (TUI) built 
 - 🏷️ **Custom Container Naming:** Define clean container names (`CONTAINER_NAME`), preventing collisions or default directory prefixes.
 - 🩺 **Runtime Daemon Health Monitoring:** Live status badges in the header (`🟢 Docker: ONLINE`, `🔴 Podman: OFFLINE`).
 - 🩺 **Database Readiness Probe (Real Health Check):** Distinguishes between `🟢 READY (Accepting Connections)` and `🟡 STARTING (Engine Booting / Init...)` via live TCP socket probing.
-- 📊 **Real-time Memory Monitoring:** Displays live container memory consumption (`RAM Usage: 124.5MiB / 15.6GiB`).
+- 📊 **Real-time CPU & Memory Monitoring:** Displays live container metrics (`CPU: 0.81%`, `RAM Usage: 124.5MiB / 15.6GiB`).
 - 📋 **One-Key Connection Copy:** Copy standard connection URIs (`postgresql://...`, `sqlserver://...`) directly to the clipboard with `c`.
 - 📦 **Backend .env Block Export (`E` / `x`):** Copy a complete multi-variable configuration block formatted ready to paste into backend projects.
 - 🪄 **Interactive Creation Wizard (`n`):** Step-by-step form to spin up new database instances with automatic free port detection.
 - 📦 **Postgres Version Selection:** Choose majors 14–18 in the create/edit wizard; volumes are auto-named (`pgdata_<name>_<version>`).
 - ✏️ **In-TUI Edit Instance:** Docked wizard (via Action Menu) to edit instance fields; **Runtime is locked** after creation (create a new instance to switch Docker/Podman); `[o]` opens external editor; saving while running prompts restart (`y`/`n`).
-- 📜 **Real-time Log Streamer (`l`):** Fullscreen live container logs viewport with smooth scrolling.
+- 📜 **Advanced Real-time Log Streamer (`l`):** Fullscreen logs viewport with live filtering (`/`), follow/pause toggle (`f`/`Space`), buffer copying (`c`), and smooth scrolling.
+- 💻 **Headless CLI Mode:** Run commands directly in your terminal or scripts without launching the TUI (`dbm list`, `dbm up`, `dbm down`, `dbm restart`, `dbm uri`, `dbm env`, `dbm logs`).
 - 🧹 **Safe Volume Purge (`d`):** Destroy container and associated data volumes with confirmation.
 - 🗑️ **Delete Instance (`D`):** Purge container+volume and remove the instance `.env` from the list (engine must be online).
 - 🐳 **Engines Panel (`e`):** Docked left panel to start Docker Desktop / Podman when offline, or stop when online (`y/n` confirm).
@@ -86,6 +87,33 @@ local-database-manager/
 | `r` | Reload | Rescan `instances/` directory and refresh daemon health |
 | `?` | Help | Open shortcuts cheatsheet and driver recommendations |
 | `q` / `Ctrl+C` | Quit | Exit application |
+
+### Logs Viewer Shortcuts (`l`)
+
+| Key | Action | Description |
+| :--- | :--- | :--- |
+| `f` / `Space` | Toggle Follow | Toggle between `[● FOLLOWING]` (autoscroll) and `[⏸ PAUSED]` |
+| `/` | Live Filter | Filter logs in real-time (`Enter` to keep, `Esc` to clear) |
+| `c` / `y` | Copy Logs | Copy currently visible/filtered log lines to clipboard |
+| `↑` / `↓` or `PgUp` / `PgDn` | Scroll | Navigate log lines manually (auto-pauses scroll) |
+| `Esc` / `q` | Return | Return to main view (clears search first if active) |
+
+---
+
+## Headless CLI Commands
+
+Manage instances directly without opening the interactive TUI:
+
+```bash
+dbm list                     # List all instances, ports, statuses, CPU% & RAM
+dbm up <name>                # Start an instance (or dbm start)
+dbm down <name>              # Stop an instance (or dbm stop)
+dbm restart <name>           # Restart an instance
+dbm uri <name> [-c|--copy]   # Print or copy connection URI
+dbm env <name> [-c|--copy]   # Print or copy backend .env block
+dbm logs <name>              # Stream container logs directly
+dbm help                     # Show CLI command help
+```
 
 ---
 

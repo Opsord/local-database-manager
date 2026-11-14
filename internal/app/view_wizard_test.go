@@ -1492,3 +1492,65 @@ func TestEditWizardPreloadsSQLServerVersion(t *testing.T) {
 		t.Fatalf("selectedVersion = %q, want %q", w.selectedVersion(), core.SQLServerAzureEdge)
 	}
 }
+
+func TestEditWizardPreservesCustomUserAndSchema(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "custom.env")
+	initial := `ENGINE=postgres
+RUNTIME=docker
+CONTAINER_NAME=pg-custom
+COMPOSE_PROJECT_NAME=pg-custom
+MEMORY_LIMIT=512M
+POSTGRES_PORT=5432
+POSTGRES_USER=custom_admin
+POSTGRES_PASSWORD=secret
+POSTGRES_DB=app_db
+POSTGRES_SCHEMA=custom_schema
+POSTGRES_VERSION=16
+POSTGRES_VOLUME=pgdata_custom_16
+CUSTOM_EXTRA_VAR=keep_me
+CUSTOM_HASH_VAR="abc#123"
+`
+	if err := os.WriteFile(path, []byte(initial), 0644); err != nil {
+		t.Fatal(err)
+	}
+	inst, err := core.ParseEnvFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := newEditWizardModel(dir, dir, []*core.DatabaseInstance{inst}, inst)
+	w.inputs[5].SetValue("1G")
+	if err := w.saveInstance(); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(updated)
+	if !strings.Contains(s, "POSTGRES_USER=custom_admin") {
+		t.Fatalf("expected custom user preserved, got:\n%s", s)
+	}
+	if !strings.Contains(s, "POSTGRES_SCHEMA=custom_schema") {
+		t.Fatalf("expected custom schema preserved, got:\n%s", s)
+	}
+	if !strings.Contains(s, "CUSTOM_EXTRA_VAR=keep_me") {
+		t.Fatalf("expected extra env var preserved, got:\n%s", s)
+	}
+	if !strings.Contains(s, `CUSTOM_HASH_VAR="abc#123"`) {
+		t.Fatalf("expected extra env var with # quoted, got:\n%s", s)
+	}
+	if !strings.Contains(s, "MEMORY_LIMIT=1G") {
+		t.Fatalf("expected memory limit updated, got:\n%s", s)
+	}
+	reparsed, err := core.ParseEnvFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reparsed.RawEnv["CUSTOM_HASH_VAR"] != "abc#123" {
+		t.Fatalf("expected reparsed CUSTOM_HASH_VAR='abc#123', got %q", reparsed.RawEnv["CUSTOM_HASH_VAR"])
+	}
+}

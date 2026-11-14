@@ -37,6 +37,7 @@ type DatabaseInstance struct {
 	Volume        string            `json:"volume"`
 	Version       string            `json:"version"`
 	Status        ContainerStatus   `json:"status"`
+	CPUUsage      string            `json:"cpu_usage"`
 	MemoryUsage   string            `json:"memory_usage"`
 	MemoryLimit   string            `json:"memory_limit"`
 	RawEnv        map[string]string `json:"raw_env"`
@@ -142,6 +143,7 @@ func ParseEnvFile(filePath string) (*DatabaseInstance, error) {
 		ContainerName: containerName,
 		ProjectName:   projectName,
 		Status:        StatusStopped,
+		CPUUsage:      "-",
 		MemoryUsage:   "-",
 		MemoryLimit:   memLimit,
 		RawEnv:        rawEnv,

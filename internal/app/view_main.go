@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"local-database-manager/internal/core"
@@ -338,16 +339,17 @@ type offlineStartMsg struct {
 }
 
 func (m *AppModel) toggleInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
+	instCopy := *inst
 	return func() tea.Msg {
 		ctx := context.Background()
 		var err error
 		var actionName string
-		if inst.Status == core.StatusReady || inst.Status == core.StatusStarting {
+		if instCopy.Status == core.StatusReady || instCopy.Status == core.StatusStarting {
 			actionName = "stopped"
-			err = m.runner.Stop(ctx, inst)
+			err = m.runner.Stop(ctx, &instCopy)
 		} else {
 			actionName = "started"
-			err = m.runner.Start(ctx, inst)
+			err = m.runner.Start(ctx, &instCopy)
 		}
 
 		if err != nil {
@@ -357,15 +359,23 @@ func (m *AppModel) toggleInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
 			return errMsg{err}
 		}
 
-		inst.Status = m.runner.CheckStatus(ctx, inst)
-		if inst.Status != core.StatusStopped {
-			inst.MemoryUsage = m.runner.GetMemoryUsage(ctx, inst)
-		} else {
-			inst.MemoryUsage = "-"
+		status := m.runner.CheckStatus(ctx, &instCopy)
+		cpu := "-"
+		mem := "-"
+		if status != core.StatusStopped {
+			instCopy.Status = status
+			stats := m.runner.GetStats(ctx, &instCopy)
+			cpu = stats.CPU
+			mem = stats.Memory
 		}
 
 		return actionDoneMsg{
-			msg: fmt.Sprintf("Instance '%s' %s successfully!", inst.Name, actionName),
+			msg:         fmt.Sprintf("Instance '%s' %s successfully!", instCopy.Name, actionName),
+			instName:    instCopy.Name,
+			hasUpdate:   true,
+			status:      status,
+			cpuUsage:    cpu,
+			memoryUsage: mem,
 		}
 	}
 }
@@ -390,24 +400,38 @@ func (m *AppModel) restartAfterEditCmd(old *core.DatabaseInstance, newName strin
 }
 
 func (m *AppModel) purgeInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
+	instCopy := *inst
 	return func() tea.Msg {
 		ctx := context.Background()
-		err := m.runner.DownVolumes(ctx, inst)
+		err := m.runner.DownVolumes(ctx, &instCopy)
 		if err != nil {
 			return errMsg{err}
 		}
-		inst.Status = m.runner.CheckStatus(ctx, inst)
-		inst.MemoryUsage = "-"
+		status := m.runner.CheckStatus(ctx, &instCopy)
+		cpu := "-"
+		mem := "-"
+		if status != core.StatusStopped {
+			instCopy.Status = status
+			stats := m.runner.GetStats(ctx, &instCopy)
+			cpu = stats.CPU
+			mem = stats.Memory
+		}
 		return actionDoneMsg{
-			msg: fmt.Sprintf("Container and volume for '%s' purged successfully!", inst.Name),
+			msg:         fmt.Sprintf("Container and volume for '%s' purged successfully!", instCopy.Name),
+			instName:    instCopy.Name,
+			hasUpdate:   true,
+			status:      status,
+			cpuUsage:    cpu,
+			memoryUsage: mem,
 		}
 	}
 }
 
 func (m *AppModel) deleteInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
+	instCopy := *inst
 	return func() tea.Msg {
 		ctx := context.Background()
-		runtime := inst.Runtime
+		runtime := instCopy.Runtime
 		if runtime == "" {
 			runtime = "docker"
 		}
@@ -418,13 +442,13 @@ func (m *AppModel) deleteInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
 		if health == core.EngineOffline {
 			return errMsg{fmt.Errorf("%w: %s is offline — start it from Engines (e) before deleting", core.ErrEngineOffline, runtime)}
 		}
-		if err := m.runner.DownVolumes(ctx, inst); err != nil {
+		if err := m.runner.DownVolumes(ctx, &instCopy); err != nil {
 			return errMsg{err}
 		}
-		if err := os.Remove(inst.EnvFilePath); err != nil && !os.IsNotExist(err) {
+		if err := os.Remove(instCopy.EnvFilePath); err != nil && !os.IsNotExist(err) {
 			return errMsg{err}
 		}
-		return deleteDoneMsg{name: inst.Name}
+		return deleteDoneMsg{name: instCopy.Name}
 	}
 }
 
@@ -665,7 +689,16 @@ func (m *AppModel) viewMain() string {
 			)
 	}
 
-	panelGap := lipgloss.NewStyle().Background(BgDark).Width(gapW).Render(" ")
+	gapH := lipgloss.Height(leftColumn)
+	if rh := lipgloss.Height(rightColumn); rh > gapH {
+		gapH = rh
+	}
+	gapCell := lipgloss.NewStyle().Background(BgDark).Width(gapW).Render(" ")
+	gapLines := make([]string, gapH)
+	for i := range gapLines {
+		gapLines[i] = gapCell
+	}
+	panelGap := strings.Join(gapLines, "\n")
 	mainSplit := lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, panelGap, rightColumn)
 
 	statusLine := m.statusMsg
