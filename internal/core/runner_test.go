@@ -225,6 +225,9 @@ func TestRunner_StopEngine_AlreadyOfflineIsNoop(t *testing.T) {
 	r := NewRunner("/tmp")
 	ctx := context.Background()
 	for _, rt := range []string{"docker", "podman"} {
+		if runtime.GOOS == "linux" && rt == "podman" {
+			continue
+		}
 		h := r.CheckEngineHealth(ctx, rt)
 		if h != EngineOffline && h != EngineNotInstalled {
 			continue

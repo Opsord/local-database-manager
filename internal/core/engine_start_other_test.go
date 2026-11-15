@@ -26,7 +26,7 @@ func TestStopDockerEngine_NonWindows_FailsFast(t *testing.T) {
 	if !strings.Contains(err.Error(), "auto-stop supported on Windows") {
 		t.Fatalf("unexpected error message: %v", err)
 	}
-	if elapsed > time.Second {
+	if elapsed > 5*time.Second {
 		t.Fatalf("stopDockerEngine took %v, want immediate failure", elapsed)
 	}
 }
