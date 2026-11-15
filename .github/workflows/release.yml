@@ -22,12 +22,22 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Verify tag is on main
+      - name: Verify tag branch policy
+        env:
+          TAG_NAME: ${{ github.ref_name }}
         run: |
-          git fetch origin main
-          if ! git merge-base --is-ancestor "${{ github.sha }}" origin/main; then
-            echo "Error: Release tags must point to a commit on the main branch."
-            exit 1
+          git fetch origin main dev
+          if [[ "$TAG_NAME" == *-* ]]; then
+            if ! git merge-base --is-ancestor "${{ github.sha }}" origin/dev && \
+               ! git merge-base --is-ancestor "${{ github.sha }}" origin/main; then
+              echo "Error: Pre-release tags ($TAG_NAME) must point to a commit on dev or main."
+              exit 1
+            fi
+          else
+            if ! git merge-base --is-ancestor "${{ github.sha }}" origin/main; then
+              echo "Error: Stable release tags ($TAG_NAME) must point to a commit on main."
+              exit 1
+            fi
           fi
 
       - name: Run GoReleaser

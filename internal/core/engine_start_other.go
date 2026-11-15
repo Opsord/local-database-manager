@@ -28,3 +28,7 @@ func launchDetachedProcess(file string, args string, showCmd int32) error {
 	_ = showCmd
 	return fmt.Errorf("launchDetachedProcess: only supported on Windows")
 }
+
+func findDockerDesktopExe() (string, error) {
+	return "", fmt.Errorf("findDockerDesktopExe: only supported on Windows")
+}

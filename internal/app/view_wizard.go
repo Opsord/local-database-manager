@@ -520,7 +520,7 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				idx := int(w.step) - int(StepName)
 				val := w.inputs[idx].Value()
 				if val != "" {
-					if err := core.CopyToClipboard(val); err != nil {
+					if err := copyToClipboard(val); err != nil {
 						m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
 						m.statusIsErr = true
 					} else {
@@ -544,7 +544,7 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				idx := int(w.step) - int(StepName)
 				val := w.inputs[idx].Value()
 				if val != "" {
-					if err := core.CopyToClipboard(val); err != nil {
+					if err := copyToClipboard(val); err != nil {
 						m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
 						m.statusIsErr = true
 					} else {

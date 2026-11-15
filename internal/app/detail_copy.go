@@ -210,6 +210,8 @@ func (m *AppModel) handleDetailsMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, boo
 	return m.handleDetailsMouseAt(msg, time.Now())
 }
 
+var copyToClipboard = core.CopyToClipboard
+
 func (m *AppModel) handleDetailsMouseAt(msg tea.MouseMsg, now time.Time) (tea.Model, tea.Cmd, bool) {
 	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
 		return m, nil, false
@@ -222,7 +224,7 @@ func (m *AppModel) handleDetailsMouseAt(msg tea.MouseMsg, now time.Time) (tea.Mo
 	if !ok {
 		return m, nil, true
 	}
-	if err := core.CopyToClipboard(text); err != nil {
+	if err := copyToClipboard(text); err != nil {
 		m.clearCopiedHit()
 		m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
 		m.statusIsErr = true

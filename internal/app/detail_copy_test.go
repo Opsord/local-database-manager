@@ -186,6 +186,10 @@ func TestDetailsContentOriginInRightPanel(t *testing.T) {
 }
 
 func TestSuccessfulCopySetsCopiedHit(t *testing.T) {
+	origCopy := copyToClipboard
+	copyToClipboard = func(string) error { return nil }
+	t.Cleanup(func() { copyToClipboard = origCopy })
+
 	m := NewApp(t.TempDir(), config.Config{})
 	m.width, m.height = 120, 40
 	m.instances = []*core.DatabaseInstance{{

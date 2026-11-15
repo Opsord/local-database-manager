@@ -1334,7 +1334,10 @@ func TestWizardHoldingBackspaceDoesNotChangeStep(t *testing.T) {
 }
 
 func TestWizardTextInputShortcuts(t *testing.T) {
-	t.Parallel()
+	origCopy := copyToClipboard
+	copyToClipboard = func(string) error { return nil }
+	t.Cleanup(func() { copyToClipboard = origCopy })
+
 	w := newWizardModel("/tmp", "/tmp/instances", nil)
 	w.maxReached = StepName
 	w.setFocus(StepName)
