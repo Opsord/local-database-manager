@@ -133,7 +133,7 @@ jobs:
         run: |
           mkdir -p dist-desktop/instances
           mkdir -p dist-desktop/db-manager-desktop.app/Contents/MacOS
-          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -tags "desktop,production" -ldflags "-s -w" -o dist-desktop/db-manager-desktop.app/Contents/MacOS/db-manager-desktop ./cmd/db-manager-desktop
+          CGO_ENABLED=1 CGO_LDFLAGS="-framework UniformTypeIdentifiers" GOOS=darwin GOARCH=arm64 go build -tags "desktop,production" -ldflags "-s -w" -o dist-desktop/db-manager-desktop.app/Contents/MacOS/db-manager-desktop ./cmd/db-manager-desktop
           cat << 'EOF' > dist-desktop/db-manager-desktop.app/Contents/Info.plist
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -164,8 +164,4 @@ jobs:
       - name: Upload desktop artifacts to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload "${{ github.ref_name }}" \
-            "db-manager-desktop_${{ matrix.target }}.${{ matrix.ext }}" \
-            "db-manager-desktop_${{ matrix.target }}.${{ matrix.ext }}.sha256" \
-            --clobber
+        run: gh release upload "${{ github.ref_name }}" "db-manager-desktop_${{ matrix.target }}.${{ matrix.ext }}" "db-manager-desktop_${{ matrix.target }}.${{ matrix.ext }}.sha256" --clobber
