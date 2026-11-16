@@ -12,9 +12,8 @@ import (
 
 func TestStopDockerEngine_NonWindows_FailsFast(t *testing.T) {
 	t.Parallel()
-	r := NewRunner("/tmp")
 	start := time.Now()
-	err := r.stopDockerEngine(context.Background())
+	err := stopDockerDaemon(context.Background(), func(context.Context) EngineHealth { return EngineOnline })
 	elapsed := time.Since(start)
 
 	if err == nil {

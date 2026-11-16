@@ -34,7 +34,7 @@ func (p *DockerProvider) Health(ctx context.Context) EngineHealth {
 		return EngineNotInstalled
 	}
 
-	cmdCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	cmdCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	cmd := hiddenCommandContext(cmdCtx, "docker", "info")
