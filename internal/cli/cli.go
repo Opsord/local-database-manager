@@ -13,6 +13,8 @@ import (
 
 	"github.com/Opsord/local-database-manager/internal/config"
 	"github.com/Opsord/local-database-manager/internal/core"
+	"github.com/Opsord/local-database-manager/internal/updater"
+	"github.com/Opsord/local-database-manager/internal/version"
 )
 
 // Run executes a CLI subcommand and returns the process exit code.
@@ -59,6 +61,13 @@ func RunWithOutput(projectRoot string, cfg config.Config, args []string, stdout,
 	case "logs":
 		return runLogs(instancesDir, runner, subArgs, stdout, stderr)
 
+	case "version", "-v", "--version":
+		fmt.Fprintf(stdout, "Local Database Manager %s (commit: %s, built: %s)\n", version.Display(), version.Commit, version.Date)
+		return 0
+
+	case "update":
+		return runUpdate(cfg, subArgs, stdout, stderr)
+
 	default:
 		fmt.Fprintf(stderr, "Unknown command: %q\n\n", subcmd)
 		printUsage(stderr)
@@ -80,6 +89,8 @@ Commands:
   uri <name> [-c|--copy]   Print or copy connection URI
   env <name> [-c|--copy]   Print or copy backend .env configuration block
   logs <name>              Stream live container logs
+  update [--check]         Check for or install application updates
+  version, -v, --version   Show version information
   help, -h, --help         Show this help message
 
 Run 'dbm' without arguments to launch the interactive Terminal User Interface (TUI).`)
@@ -344,4 +355,60 @@ func hasCopyFlag(args []string) bool {
 		}
 	}
 	return false
+}
+
+func runUpdate(cfg config.Config, args []string, stdout, stderr io.Writer) int {
+	checkOnly := false
+	for _, a := range args {
+		switch a {
+		case "--check", "-c":
+			checkOnly = true
+		default:
+			fmt.Fprintf(stderr, "Unknown flag for update: %q\nUsage: dbm update [--check]\n", a)
+			return 1
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	fmt.Fprintln(stdout, "Checking for updates...")
+	info, err := updater.Check(ctx, updater.CheckOptions{
+		Target:            updater.TargetCLI,
+		IncludePrerelease: cfg.UpdateChannel == "prerelease",
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "Error checking for updates: %v\n", err)
+		return 1
+	}
+
+	if !info.UpdateAvailable {
+		fmt.Fprintf(stdout, "Local Database Manager is up to date (%s).\n", info.CurrentVersion)
+		return 0
+	}
+
+	fmt.Fprintf(stdout, "Update available: %s -> %s (%s)\n", info.CurrentVersion, info.LatestVersion, info.ReleaseURL)
+	if checkOnly {
+		return 0
+	}
+
+	applyCtx, applyCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer applyCancel()
+
+	lastStage := updater.ProgressStage("")
+	err = updater.Apply(applyCtx, info, updater.ApplyOptions{
+		OnProgress: func(stage updater.ProgressStage, pct int, msg string) {
+			if stage != lastStage || pct == 100 || pct%25 == 0 {
+				lastStage = stage
+				fmt.Fprintf(stdout, "  %s\n", msg)
+			}
+		},
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "Error applying update: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "Successfully updated to %s! Restart db-manager to use the new version.\n", info.LatestVersion)
+	return 0
 }

@@ -13,6 +13,7 @@ import {
   extractErrorMessage,
   hasDesktopBridge,
   subscribeLogEvents,
+  subscribeUpdateEvents,
 } from './lib/backend';
 import type {
   AppMetadata,
@@ -21,11 +22,14 @@ import type {
   InstanceDTO,
   SaveInstanceRequest,
   ThemeId,
+  UpdateInfoDTO,
 } from './types';
 
 type DockMode = 'none' | 'logs' | 'wizard-create' | 'wizard-edit' | 'engines';
 
 const DEFAULT_METADATA: AppMetadata = {
+  app_version: 'dev',
+  check_updates: true,
   project_root: '',
   instances_dir: '',
   postgres_versions: ['14', '15', '16', '17', '18'],
@@ -74,6 +78,7 @@ export default function App() {
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [engineBusy, setEngineBusy] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfoDTO | null>(null);
 
   const [paletteOpen, setPaletteOpen] = useState<boolean>(false);
   const [helpOpen, setHelpOpen] = useState<boolean>(false);
@@ -149,10 +154,31 @@ export default function App() {
     }
     backend
       .getAppMetadata()
-      .then((meta) => setMetadata(meta))
+      .then((meta) => {
+        setMetadata(meta);
+        if (meta.check_updates) {
+          backend
+            .checkForUpdates()
+            .then((info) => {
+              if (info.update_available) {
+                setUpdateInfo(info);
+              }
+            })
+            .catch(() => {});
+        }
+      })
       .catch(() => {});
     refreshData(true);
   }, [refreshData, showStatus]);
+
+  // Update download/install progress events listener
+  useEffect(() => {
+    return subscribeUpdateEvents((ev) => {
+      if (ev.message) {
+        showStatus(ev.message, false, 0);
+      }
+    });
+  }, [showStatus]);
 
   // Periodic health & metrics polling aligned with config.yml interval
   useEffect(() => {
@@ -418,6 +444,46 @@ export default function App() {
     [refreshData, showStatus]
   );
 
+  const handleCheckForUpdates = useCallback(
+    async (manual: boolean) => {
+      if (!hasDesktopBridge()) {
+        if (manual) {
+          showStatus('Update check is unavailable in browser preview mode.', true, 4000);
+        }
+        return;
+      }
+      if (manual && updateInfo?.update_available) {
+        setConfirm({ kind: 'update-available', info: updateInfo });
+        return;
+      }
+      if (manual) {
+        setBusyAction('Checking updates');
+        showStatus('Checking for updates...', false, 0);
+      }
+      try {
+        const info = await backend.checkForUpdates();
+        setUpdateInfo(info);
+        if (info.update_available) {
+          if (manual) {
+            setConfirm({ kind: 'update-available', info });
+            showStatus(`Update ${info.latest_version} available!`, false, 0);
+          }
+        } else if (manual) {
+          showStatus(`Up to date (${info.current_version}).`, false, 3500);
+        }
+      } catch (err) {
+        if (manual) {
+          showStatus(`Update check failed: ${extractErrorMessage(err)}`, true, 5000);
+        }
+      } finally {
+        if (manual) {
+          setBusyAction(null);
+        }
+      }
+    },
+    [showStatus, updateInfo]
+  );
+
   const executeConfirm = useCallback(async () => {
     if (!confirm) return;
     const current = confirm;
@@ -499,6 +565,37 @@ export default function App() {
         }
         break;
       }
+      case 'update-available': {
+        setBusyAction('Updating');
+        showStatus(`Downloading and installing ${current.info.latest_version}...`, false, 0);
+        try {
+          await backend.applyUpdate();
+          setUpdateInfo((prev) =>
+            prev ? { ...prev, update_available: false } : prev
+          );
+          setConfirm({
+            kind: 'update-restart',
+            version: current.info.latest_version,
+          });
+          showStatus(`Updated to ${current.info.latest_version}! Restart to apply.`, false, 0);
+        } catch (err) {
+          showStatus(`Update failed: ${extractErrorMessage(err)}`, true, 6000);
+        } finally {
+          setBusyAction(null);
+        }
+        break;
+      }
+      case 'update-restart': {
+        setBusyAction('Restarting');
+        showStatus(`Restarting application (${current.version})...`, false, 0);
+        try {
+          await backend.restartApp();
+        } catch (err) {
+          setBusyAction(null);
+          showStatus(`Restart failed: ${extractErrorMessage(err)}`, true, 6000);
+        }
+        break;
+      }
     }
   }, [confirm, handleStartEngine, handleStopEngine, refreshData, showStatus]);
 
@@ -555,6 +652,17 @@ export default function App() {
         run: () => {
           showStatus('Reloading instances and inspecting runtimes...', false, 2000);
           refreshData(true);
+        },
+      },
+      {
+        id: 'check-updates',
+        label: updateInfo?.update_available
+          ? `Install Update (${updateInfo.latest_version})`
+          : 'Check for Updates',
+        category: 'System',
+        shortcut: 'u',
+        run: () => {
+          handleCheckForUpdates(true);
         },
       },
       {
@@ -655,6 +763,7 @@ export default function App() {
 
     return cmds;
   }, [
+    handleCheckForUpdates,
     handleCopy,
     handleOpenEditor,
     handleToggleInstance,
@@ -664,6 +773,7 @@ export default function App() {
     selectInstance,
     selectedInstance,
     showStatus,
+    updateInfo,
   ]);
 
   // Global keyboard shortcuts matching TUI + Zed Command Palette
@@ -886,6 +996,12 @@ export default function App() {
           showStatus('Reloading instances and inspecting runtimes...', false, 2000);
           refreshData(true);
           break;
+        case 'u':
+          if (!busyAction) {
+            e.preventDefault();
+            handleCheckForUpdates(true);
+          }
+          break;
       }
     };
 
@@ -904,6 +1020,7 @@ export default function App() {
     executeConfirm,
     filterText,
     filteredInstances,
+    handleCheckForUpdates,
     handleCopy,
     handleOpenEditor,
     handleToggleInstance,
@@ -929,6 +1046,13 @@ export default function App() {
         engineBusy={engineBusy}
         isRefreshing={isRefreshing}
         theme={theme}
+        appVersion={metadata.app_version}
+        updateInfo={updateInfo}
+        onUpdateClick={() => {
+          if (updateInfo?.update_available) {
+            setConfirm({ kind: 'update-available', info: updateInfo });
+          }
+        }}
         onToggleTheme={() =>
           setTheme((prev) => (prev === 'zed-dark' ? 'night-owl' : 'zed-dark'))
         }

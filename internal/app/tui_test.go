@@ -8,6 +8,7 @@ import (
 
 	"github.com/Opsord/local-database-manager/internal/config"
 	"github.com/Opsord/local-database-manager/internal/core"
+	"github.com/Opsord/local-database-manager/internal/updater"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -200,5 +201,47 @@ func TestInitStartsEngineHealthProbe(t *testing.T) {
 	msg := cmd()
 	if _, ok := msg.(tea.BatchMsg); !ok {
 		t.Fatalf("Init cmd produced %T, want tea.BatchMsg (reload + health probe)", msg)
+	}
+}
+
+func TestUpdateCheckAndConfirmFlow(t *testing.T) {
+	t.Parallel()
+
+	m := NewApp(t.TempDir(), config.Config{EngineHealthInterval: 5 * time.Second})
+	info := updater.ReleaseInfo{
+		CurrentVersion:  "v0.1.0",
+		LatestVersion:   "v0.2.0",
+		UpdateAvailable: true,
+	}
+
+	// Silent startup check stores updateInfo without opening confirmation prompt.
+	updated, _ := m.Update(updateCheckMsg{info: info, manual: false})
+	am := updated.(*AppModel)
+	if am.updateInfo == nil || !am.updateInfo.UpdateAvailable {
+		t.Fatalf("expected updateInfo to be stored")
+	}
+	if am.confirmUpdate {
+		t.Fatalf("silent startup check should not set confirmUpdate")
+	}
+
+	// Pressing 'u' when an update is already known prompts for confirmation.
+	updated, _ = am.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	am = updated.(*AppModel)
+	if !am.confirmUpdate {
+		t.Fatalf("expected confirmUpdate=true after pressing 'u'")
+	}
+
+	// Pressing 'n' cancels confirmation.
+	updated, _ = am.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	am = updated.(*AppModel)
+	if am.confirmUpdate {
+		t.Fatalf("expected confirmUpdate=false after pressing 'n'")
+	}
+
+	// Applying update completion clears UpdateAvailable.
+	updated, _ = am.Update(updateAppliedMsg{version: "v0.2.0"})
+	am = updated.(*AppModel)
+	if am.updateInfo.UpdateAvailable {
+		t.Fatalf("expected UpdateAvailable=false after successful update")
 	}
 }

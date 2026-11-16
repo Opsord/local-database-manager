@@ -19,6 +19,7 @@ const SHORTCUTS: Array<[string, string]> = [
   ['d', 'Purge container and persistent volume (down -v); keeps .env'],
   ['D', 'Delete instance: purge container+volume and remove .env'],
   ['r', 'Reload instances & recheck Docker / Podman daemon health'],
+  ['u', 'Check for updates or install available update'],
   ['f / Space (Logs)', 'Toggle Following / Paused auto-scroll in Logs dock'],
   ['y / n', 'Confirm or cancel active confirmation prompt'],
   ['?', 'Toggle this keyboard shortcuts reference'],

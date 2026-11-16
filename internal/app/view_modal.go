@@ -277,6 +277,7 @@ func (m *AppModel) viewHelp() string {
 		{"[d]", "Purge instance container and wipe persistent volume (down -v); keeps the .env definition"},
 		{"[D]", "Delete instance: purge container+volume and remove the .env from the list"},
 		{"[r]", "Reload instances & recheck Docker / Podman daemon health"},
+		{"[u]", "Check for updates or install available update"},
 		{"[?]", "Toggle this help reference screen"},
 		{"[q / Ctrl+C]", "Quit application"},
 	}

@@ -74,6 +74,22 @@ function describeConfirm(confirm: ConfirmState): {
         cancelLabel: 'Cancel',
         confirmLabel: 'Confirm',
       };
+    case 'update-available':
+      return {
+        title: `Update ${confirm.info.latest_version} is available (current: ${confirm.info.current_version}). Install now?`,
+        detail: 'Downloads the release archive, verifies SHA-256 checksum, and replaces the binary.',
+        danger: false,
+        cancelLabel: 'Later',
+        confirmLabel: 'Install Update',
+      };
+    case 'update-restart':
+      return {
+        title: `Updated to ${confirm.version}. Restart application now?`,
+        detail: 'Running database containers will remain active while the desktop UI restarts.',
+        danger: false,
+        cancelLabel: 'Later',
+        confirmLabel: 'Restart Now',
+      };
   }
 }
 

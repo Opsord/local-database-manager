@@ -6,6 +6,8 @@ import type {
   LogLineEvent,
   SaveInstanceRequest,
   SaveInstanceResponse,
+  UpdateInfoDTO,
+  UpdateProgressEvent,
 } from '../types';
 
 interface WailsServiceBinding {
@@ -28,6 +30,9 @@ interface WailsServiceBinding {
   StopLogStream(): Promise<void>;
   CopyText(text: string): Promise<void>;
   OpenEnvInEditor(name: string): Promise<void>;
+  CheckForUpdates(): Promise<UpdateInfoDTO>;
+  ApplyUpdate(): Promise<void>;
+  RestartApp(): Promise<void>;
 }
 
 interface WailsRuntime {
@@ -92,6 +97,9 @@ export const backend = {
     await navigator.clipboard.writeText(text);
   },
   openEnvInEditor: (name: string): Promise<void> => getService().OpenEnvInEditor(name),
+  checkForUpdates: (): Promise<UpdateInfoDTO> => getService().CheckForUpdates(),
+  applyUpdate: (): Promise<void> => getService().ApplyUpdate(),
+  restartApp: (): Promise<void> => getService().RestartApp(),
   quitApp: (): void => {
     window.runtime?.Quit?.();
   },
@@ -119,6 +127,24 @@ export function subscribeLogEvents(
     if (typeof offLine === 'function') offLine();
     if (typeof offClosed === 'function') offClosed();
     rt.EventsOff?.('logs:line', 'logs:closed');
+  };
+}
+
+export function subscribeUpdateEvents(
+  onProgress: (event: UpdateProgressEvent) => void
+): () => void {
+  const rt = window.runtime;
+  if (!rt?.EventsOn) {
+    return () => {};
+  }
+  const offProgress = rt.EventsOn('update:progress', (payload: unknown) => {
+    if (payload && typeof payload === 'object') {
+      onProgress(payload as UpdateProgressEvent);
+    }
+  });
+  return () => {
+    if (typeof offProgress === 'function') offProgress();
+    rt.EventsOff?.('update:progress');
   };
 }
 

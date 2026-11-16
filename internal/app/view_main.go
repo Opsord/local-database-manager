@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Opsord/local-database-manager/internal/core"
+	"github.com/Opsord/local-database-manager/internal/version"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -78,7 +79,7 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "esc":
-			if m.confirmPurge || m.confirmDelete || m.confirmEngineStart || m.confirmEngineStop || m.confirmRestartAfterEdit || m.confirmQuitStopEngine {
+			if m.confirmPurge || m.confirmDelete || m.confirmEngineStart || m.confirmEngineStop || m.confirmRestartAfterEdit || m.confirmQuitStopEngine || m.confirmUpdate {
 				m.clearConfirms()
 				m.statusMsg = "Action cancelled"
 				m.statusIsErr = false
@@ -110,7 +111,7 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedIndex--
 				m.clearCopiedHit()
 			}
-			if m.confirmPurge || m.confirmDelete || m.confirmEngineStart || m.confirmEngineStop || m.confirmRestartAfterEdit || m.confirmQuitStopEngine {
+			if m.confirmPurge || m.confirmDelete || m.confirmEngineStart || m.confirmEngineStop || m.confirmRestartAfterEdit || m.confirmQuitStopEngine || m.confirmUpdate {
 				m.clearConfirms()
 				m.statusMsg = ""
 			}
@@ -122,7 +123,7 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedIndex++
 				m.clearCopiedHit()
 			}
-			if m.confirmPurge || m.confirmDelete || m.confirmEngineStart || m.confirmEngineStop || m.confirmRestartAfterEdit || m.confirmQuitStopEngine {
+			if m.confirmPurge || m.confirmDelete || m.confirmEngineStart || m.confirmEngineStop || m.confirmRestartAfterEdit || m.confirmQuitStopEngine || m.confirmUpdate {
 				m.clearConfirms()
 				m.statusMsg = ""
 			}
@@ -265,8 +266,21 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.deleteInstanceCmd(inst)
 				}
 			}
+			if m.confirmUpdate && m.updateInfo != nil {
+				m.confirmUpdate = false
+				m.updating = true
+				m.statusMsg = fmt.Sprintf("Downloading and installing %s...", m.updateInfo.LatestVersion)
+				m.statusIsErr = false
+				return m, m.applyUpdateCmd()
+			}
 
 		case "n":
+			if m.confirmUpdate {
+				m.confirmUpdate = false
+				m.statusMsg = "Update cancelled"
+				m.statusIsErr = false
+				return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
+			}
 			if m.confirmQuitStopEngine {
 				m.confirmQuitStopEngine = false
 				m.pendingQuitRuntime = ""
@@ -320,6 +334,23 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = "Reloading instances and inspecting runtimes..."
 			m.statusIsErr = false
 			return m, tea.Batch(m.reloadInstancesCmd(), m.checkEngineHealthCmd(false))
+
+		case "u":
+			if m.updating || m.updateChecking {
+				return m, nil
+			}
+			if m.updateInfo != nil && m.updateInfo.UpdateAvailable {
+				m.clearConfirms()
+				m.confirmUpdate = true
+				m.statusMsg = fmt.Sprintf("Update %s available. Download and install now? Press 'y' to confirm, 'n' to cancel", m.updateInfo.LatestVersion)
+				m.statusIsErr = true
+				return m, nil
+			}
+			m.clearConfirms()
+			m.updateChecking = true
+			m.statusMsg = "Checking for updates..."
+			m.statusIsErr = false
+			return m, m.checkUpdateCmd(true)
 		}
 	}
 
@@ -555,18 +586,30 @@ func (m *AppModel) viewMain() string {
 	dockerBadge := engineBadge("Docker", m.dockerHealth)
 	podmanBadge := engineBadge("Podman", m.podmanHealth)
 
+	headerParts := []string{
+		lipgloss.NewStyle().Bold(true).Foreground(FgText).Background(HeaderBg).Render("LOCAL DATABASE MANAGER"),
+		lipgloss.NewStyle().Foreground(MutedColor).Background(HeaderBg).Render(" " + version.Display()),
+		lipgloss.NewStyle().Foreground(MutedColor).Background(HeaderBg).Render("  |  "),
+		dockerBadge,
+		lipgloss.NewStyle().Foreground(MutedColor).Background(HeaderBg).Render(" "),
+		podmanBadge,
+	}
+	if m.updateInfo != nil && m.updateInfo.UpdateAvailable {
+		updateBadge := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(WarningColor).
+			Background(SelectedBg).
+			Padding(0, 1).
+			Render(fmt.Sprintf("↑ Update %s [u]", m.updateInfo.LatestVersion))
+		headerParts = append(headerParts,
+			lipgloss.NewStyle().Foreground(MutedColor).Background(HeaderBg).Render("  "),
+			updateBadge,
+		)
+	}
+
 	header := HeaderStyle.
 		Width(inner).
-		Render(
-			lipgloss.JoinHorizontal(
-				lipgloss.Top,
-				lipgloss.NewStyle().Bold(true).Foreground(FgText).Background(HeaderBg).Render("LOCAL DATABASE MANAGER"),
-				lipgloss.NewStyle().Foreground(MutedColor).Background(HeaderBg).Render("  |  "),
-				dockerBadge,
-				lipgloss.NewStyle().Foreground(MutedColor).Background(HeaderBg).Render(" "),
-				podmanBadge,
-			),
-		)
+		Render(lipgloss.JoinHorizontal(lipgloss.Top, headerParts...))
 
 	leftInner := panelInnerWidth(leftWidth)
 	rightInner := panelInnerWidth(rightWidth)

@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  ArrowUpCircle,
   Command,
   Database,
   HelpCircle,
@@ -7,7 +8,7 @@ import {
   RefreshCw,
   Server,
 } from 'lucide-react';
-import type { EngineHealth, EnginesHealthDTO, InstanceDTO, ThemeId } from '../types';
+import type { EngineHealth, EnginesHealthDTO, InstanceDTO, ThemeId, UpdateInfoDTO } from '../types';
 
 interface TitleBarProps {
   selectedInstance: InstanceDTO | null;
@@ -15,6 +16,9 @@ interface TitleBarProps {
   engineBusy: boolean;
   isRefreshing: boolean;
   theme: ThemeId;
+  appVersion: string;
+  updateInfo: UpdateInfoDTO | null;
+  onUpdateClick: () => void;
   onToggleTheme: () => void;
   onOpenEngineDock: () => void;
   onRefresh: () => void;
@@ -50,6 +54,9 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   engineBusy,
   isRefreshing,
   theme,
+  appVersion,
+  updateInfo,
+  onUpdateClick,
   onToggleTheme,
   onOpenEngineDock,
   onRefresh,
@@ -70,6 +77,16 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           <Database className="w-3.5 h-3.5" style={{ color: 'var(--accent-primary)' }} />
           <span className="text-[12.5px] font-semibold" style={{ color: 'var(--text-primary)' }}>
             local-database-manager
+          </span>
+          <span
+            className="text-[10.5px] font-mono px-1.5 py-0.2 rounded border"
+            style={{
+              backgroundColor: 'var(--bg-app)',
+              borderColor: 'var(--border-subtle)',
+              color: 'var(--text-muted)',
+            }}
+          >
+            {appVersion}
           </span>
         </div>
         <span style={{ color: 'var(--text-muted)' }}>›</span>
@@ -92,6 +109,23 @@ export const TitleBar: React.FC<TitleBarProps> = ({
 
       {/* Right: Engine Badges + Zed utility controls */}
       <div className="flex items-center gap-1.5">
+        {updateInfo?.update_available && (
+          <button
+            type="button"
+            onClick={onUpdateClick}
+            title={`Update ${updateInfo.latest_version} available [u]`}
+            className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium border transition-colors hover:brightness-110"
+            style={{
+              backgroundColor: 'rgba(229, 192, 123, 0.16)',
+              borderColor: 'var(--status-starting)',
+              color: 'var(--status-starting)',
+            }}
+          >
+            <ArrowUpCircle className="w-3 h-3" />
+            <span>Update {updateInfo.latest_version}</span>
+          </button>
+        )}
+
         <button
           type="button"
           onClick={onOpenEngineDock}

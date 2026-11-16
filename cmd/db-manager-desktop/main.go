@@ -12,6 +12,7 @@ import (
 	"github.com/Opsord/local-database-manager/internal/core"
 	"github.com/Opsord/local-database-manager/internal/desktop"
 	"github.com/Opsord/local-database-manager/internal/logger"
+	"github.com/Opsord/local-database-manager/internal/updater"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -22,6 +23,8 @@ import (
 )
 
 func main() {
+	updater.CleanupOldBinary()
+
 	projectRoot, rootErr := dbmanager.ResolveWorkspace()
 	if rootErr != nil {
 		fmt.Fprintf(os.Stderr, "Error initializing workspace: %v\n", rootErr)
@@ -59,6 +62,9 @@ func main() {
 		OnStartup: func(ctx context.Context) {
 			svc.SetEventEmitter(func(event string, data ...any) {
 				runtime.EventsEmit(ctx, event, data...)
+			})
+			svc.SetQuitFunc(func() {
+				runtime.Quit(ctx)
 			})
 		},
 		OnShutdown: func(_ context.Context) {

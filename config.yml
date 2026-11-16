@@ -4,6 +4,12 @@
 # How often to re-check Docker / Podman daemon health.
 engine_health_interval: 5s
 
+# Check GitHub Releases for newer app versions on startup.
+check_updates: true
+
+# Release channel to track: "stable" or "prerelease".
+update_channel: stable
+
 # --- not read yet ---
 # engine_health_timeout: 3s
 # compose_start_timeout: 45s

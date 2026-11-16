@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -11,6 +12,8 @@ import (
 
 type Config struct {
 	EngineHealthInterval time.Duration
+	CheckUpdates         bool
+	UpdateChannel        string
 }
 
 func Load(projectRoot string) (Config, error) {
@@ -22,6 +25,8 @@ func Load(projectRoot string) (Config, error) {
 
 	var raw struct {
 		EngineHealthInterval string `yaml:"engine_health_interval"`
+		CheckUpdates         *bool  `yaml:"check_updates"`
+		UpdateChannel        string `yaml:"update_channel"`
 	}
 	if err := yaml.Unmarshal(data, &raw); err != nil {
 		return Config{}, fmt.Errorf("parse %s: %w", path, err)
@@ -38,5 +43,22 @@ func Load(projectRoot string) (Config, error) {
 		return Config{}, fmt.Errorf("%s: engine_health_interval must be > 0, got %s", path, d)
 	}
 
-	return Config{EngineHealthInterval: d}, nil
+	checkUpdates := true
+	if raw.CheckUpdates != nil {
+		checkUpdates = *raw.CheckUpdates
+	}
+
+	updateChannel := strings.ToLower(strings.TrimSpace(raw.UpdateChannel))
+	if updateChannel == "" {
+		updateChannel = "stable"
+	}
+	if updateChannel != "stable" && updateChannel != "prerelease" {
+		return Config{}, fmt.Errorf("%s: update_channel must be 'stable' or 'prerelease', got %q", path, raw.UpdateChannel)
+	}
+
+	return Config{
+		EngineHealthInterval: d,
+		CheckUpdates:         checkUpdates,
+		UpdateChannel:        updateChannel,
+	}, nil
 }

@@ -27,6 +27,29 @@ func TestLoad_ValidInterval(t *testing.T) {
 	if cfg.EngineHealthInterval != 10*time.Second {
 		t.Fatalf("interval = %v, want 10s", cfg.EngineHealthInterval)
 	}
+	if !cfg.CheckUpdates {
+		t.Fatalf("CheckUpdates = false, want default true")
+	}
+	if cfg.UpdateChannel != "stable" {
+		t.Fatalf("UpdateChannel = %q, want default 'stable'", cfg.UpdateChannel)
+	}
+}
+
+func TestLoad_UpdateSettings(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeConfig(t, dir, "engine_health_interval: 5s\ncheck_updates: false\nupdate_channel: PreRelease\n")
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.CheckUpdates {
+		t.Fatalf("CheckUpdates = true, want false")
+	}
+	if cfg.UpdateChannel != "prerelease" {
+		t.Fatalf("UpdateChannel = %q, want 'prerelease'", cfg.UpdateChannel)
+	}
 }
 
 func TestLoad_Errors(t *testing.T) {
@@ -86,6 +109,15 @@ func TestLoad_Errors(t *testing.T) {
 				return dir
 			},
 			want: "engine_health_interval",
+		},
+		{
+			name: "invalid update channel",
+			dir: func(t *testing.T) string {
+				dir := t.TempDir()
+				writeConfig(t, dir, "engine_health_interval: 5s\nupdate_channel: nightly\n")
+				return dir
+			},
+			want: "update_channel",
 		},
 	}
 

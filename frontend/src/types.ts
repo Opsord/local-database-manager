@@ -5,6 +5,8 @@ export type EngineHealth = 'ONLINE' | 'OFFLINE' | 'NOT_INSTALLED';
 export type ThemeId = 'zed-dark' | 'night-owl';
 
 export interface AppMetadata {
+  app_version: string;
+  check_updates: boolean;
   project_root: string;
   instances_dir: string;
   postgres_versions: string[];
@@ -12,6 +14,25 @@ export interface AppMetadata {
   default_postgres_version: string;
   default_sqlserver_version: string;
   engine_health_interval_ms: number;
+}
+
+export interface UpdateInfoDTO {
+  current_version: string;
+  latest_version: string;
+  update_available: boolean;
+  is_prerelease: boolean;
+  release_url: string;
+  asset_name: string;
+  asset_url: string;
+  checksum_url: string;
+  release_notes: string;
+  published_at: string;
+}
+
+export interface UpdateProgressEvent {
+  stage: string;
+  percent: number;
+  message: string;
 }
 
 export interface InstanceDTO {
@@ -85,6 +106,8 @@ export type ConfirmState =
   | { kind: 'engine-start-retry'; runtime: string; inst: InstanceDTO }
   | { kind: 'engine-stop'; runtime: string }
   | { kind: 'quit-stop-engine'; runtime: string }
+  | { kind: 'update-available'; info: UpdateInfoDTO }
+  | { kind: 'update-restart'; version: string }
   | {
       kind: 'restart-after-edit';
       oldName: string;

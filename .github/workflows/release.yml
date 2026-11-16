@@ -106,7 +106,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist-desktop/instances | Out-Null
-          go build -tags "desktop,production" -ldflags "-s -w -H windowsgui" -o dist-desktop/db-manager-desktop.exe ./cmd/db-manager-desktop
+          go build -tags "desktop,production" -ldflags "-s -w -H windowsgui -X github.com/Opsord/local-database-manager/internal/version.Version=${{ github.ref_name }}" -o dist-desktop/db-manager-desktop.exe ./cmd/db-manager-desktop
           Copy-Item README.md, LICENSE, config.yml dist-desktop/
           Copy-Item -Recurse engines dist-desktop/engines
           Copy-Item instances/.env.template dist-desktop/instances/.env.template
@@ -120,7 +120,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist-desktop/instances
-          go build -tags "desktop,production,webkit2_41" -ldflags "-s -w" -o dist-desktop/db-manager-desktop ./cmd/db-manager-desktop
+          go build -tags "desktop,production,webkit2_41" -ldflags "-s -w -X github.com/Opsord/local-database-manager/internal/version.Version=${{ github.ref_name }}" -o dist-desktop/db-manager-desktop ./cmd/db-manager-desktop
           cp README.md LICENSE config.yml dist-desktop/
           cp -r engines dist-desktop/engines
           cp instances/.env.template dist-desktop/instances/.env.template
@@ -134,7 +134,7 @@ jobs:
         run: |
           mkdir -p dist-desktop/instances
           mkdir -p dist-desktop/db-manager-desktop.app/Contents/MacOS
-          CGO_ENABLED=1 CGO_LDFLAGS="-framework UniformTypeIdentifiers" GOOS=darwin GOARCH=arm64 go build -tags "desktop,production" -ldflags "-s -w" -o dist-desktop/db-manager-desktop.app/Contents/MacOS/db-manager-desktop ./cmd/db-manager-desktop
+          CGO_ENABLED=1 CGO_LDFLAGS="-framework UniformTypeIdentifiers" GOOS=darwin GOARCH=arm64 go build -tags "desktop,production" -ldflags "-s -w -X github.com/Opsord/local-database-manager/internal/version.Version=${{ github.ref_name }}" -o dist-desktop/db-manager-desktop.app/Contents/MacOS/db-manager-desktop ./cmd/db-manager-desktop
           cat << 'EOF' > dist-desktop/db-manager-desktop.app/Contents/Info.plist
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

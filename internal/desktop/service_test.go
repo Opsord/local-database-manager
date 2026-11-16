@@ -2,7 +2,10 @@ package desktop
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -461,5 +464,53 @@ func TestListInstancesSkipsInspectionWhenEngineOffline(t *testing.T) {
 	runner.mu.Unlock()
 	if calls != 0 {
 		t.Fatalf("expected CheckStatus not to be called when engine offline, got %d calls", calls)
+	}
+}
+
+func TestGetAppMetadataAndCheckForUpdates(t *testing.T) {
+	svc, _, _ := setupTestService(t)
+	svc.cfg.CheckUpdates = true
+
+	meta := svc.GetAppMetadata()
+	if meta.AppVersion == "" {
+		t.Fatal("expected non-empty AppVersion in metadata")
+	}
+	if !meta.CheckUpdates {
+		t.Fatal("expected CheckUpdates=true in metadata")
+	}
+
+	assetName := "db-manager-desktop_Windows_x86_64.zip"
+	if runtime.GOOS == "linux" {
+		assetName = "db-manager-desktop_Linux_x86_64.tar.gz"
+	} else if runtime.GOOS == "darwin" {
+		assetName = "db-manager-desktop_Darwin_arm64.zip"
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{
+				"tag_name":   "v9.9.9",
+				"html_url":   "https://github.com/Opsord/local-database-manager/releases/tag/v9.9.9",
+				"prerelease": false,
+				"draft":      false,
+				"assets": []map[string]any{
+					{"name": assetName, "browser_download_url": "https://example.test/" + assetName},
+					{"name": assetName + ".sha256", "browser_download_url": "https://example.test/" + assetName + ".sha256"},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	svc.updateBaseURL = srv.URL
+	info, err := svc.CheckForUpdates()
+	if err != nil {
+		t.Fatalf("CheckForUpdates() error = %v", err)
+	}
+	if !info.UpdateAvailable || info.LatestVersion != "v9.9.9" {
+		t.Fatalf("unexpected release info: %+v", info)
+	}
+	if info.AssetName != assetName {
+		t.Fatalf("AssetName = %q, want %q", info.AssetName, assetName)
 	}
 }

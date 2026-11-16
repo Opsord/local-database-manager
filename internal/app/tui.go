@@ -11,6 +11,8 @@ import (
 
 	"github.com/Opsord/local-database-manager/internal/config"
 	"github.com/Opsord/local-database-manager/internal/core"
+	"github.com/Opsord/local-database-manager/internal/updater"
+	"github.com/Opsord/local-database-manager/internal/version"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -59,6 +61,17 @@ type engineHealthTickMsg struct{}
 
 type quitAfterStopMsg struct{}
 
+type updateCheckMsg struct {
+	info   updater.ReleaseInfo
+	err    error
+	manual bool
+}
+
+type updateAppliedMsg struct {
+	version string
+	err     error
+}
+
 // AppModel is the root Bubble Tea application state.
 type AppModel struct {
 	projectRoot  string
@@ -104,6 +117,11 @@ type AppModel struct {
 	pendingRestartNewName   string
 	pendingDeleteEnvPath    string
 
+	updateInfo     *updater.ReleaseInfo
+	updateChecking bool
+	updating       bool
+	confirmUpdate  bool
+
 	width  int
 	height int
 
@@ -140,6 +158,7 @@ func (m *AppModel) clearConfirms() {
 	m.confirmRestartAfterEdit = false
 	m.pendingRestartOld = nil
 	m.pendingRestartNewName = ""
+	m.confirmUpdate = false
 }
 
 // NewApp instantiates a new AppModel.
@@ -161,7 +180,44 @@ func NewApp(projectRoot string, cfg config.Config) *AppModel {
 
 // Init initializes the model, instantly loads instances and launches parallel inspections in background.
 func (m *AppModel) Init() tea.Cmd {
-	return tea.Batch(m.reloadInstancesCmd(), m.checkEngineHealthCmd(true))
+	cmds := []tea.Cmd{m.reloadInstancesCmd(), m.checkEngineHealthCmd(true)}
+	if m.cfg.CheckUpdates {
+		cmds = append(cmds, m.checkUpdateCmd(false))
+	}
+	return tea.Batch(cmds...)
+}
+
+func (m *AppModel) checkUpdateCmd(manual bool) tea.Cmd {
+	includePre := m.cfg.UpdateChannel == "prerelease"
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		defer cancel()
+		info, err := updater.Check(ctx, updater.CheckOptions{
+			Target:            updater.TargetCLI,
+			IncludePrerelease: includePre,
+		})
+		return updateCheckMsg{
+			info:   info,
+			err:    err,
+			manual: manual,
+		}
+	}
+}
+
+func (m *AppModel) applyUpdateCmd() tea.Cmd {
+	if m.updateInfo == nil {
+		return nil
+	}
+	info := *m.updateInfo
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		err := updater.Apply(ctx, info, updater.ApplyOptions{})
+		return updateAppliedMsg{
+			version: info.LatestVersion,
+			err:     err,
+		}
+	}
 }
 
 func (m *AppModel) checkEngineHealthCmd(scheduleTick bool) tea.Cmd {
@@ -425,6 +481,46 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case quitAfterStopMsg:
 		return m, tea.Quit
+
+	case updateCheckMsg:
+		m.updateChecking = false
+		if msg.err != nil {
+			if msg.manual {
+				m.statusMsg = fmt.Sprintf("Update check failed: %v", msg.err)
+				m.statusIsErr = true
+				return m, tea.Tick(5*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
+			}
+			return m, nil
+		}
+		infoCopy := msg.info
+		m.updateInfo = &infoCopy
+		if msg.manual {
+			if msg.info.UpdateAvailable {
+				m.clearConfirms()
+				m.confirmUpdate = true
+				m.statusMsg = fmt.Sprintf("Update %s available (current: %s). Install now? Press 'y' to confirm, 'n' to cancel", msg.info.LatestVersion, msg.info.CurrentVersion)
+				m.statusIsErr = true
+				return m, nil
+			}
+			m.statusMsg = fmt.Sprintf("Up to date (%s)", version.Display())
+			m.statusIsErr = false
+			return m, tea.Tick(4*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
+		}
+		return m, nil
+
+	case updateAppliedMsg:
+		m.updating = false
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("Update failed: %v", msg.err)
+			m.statusIsErr = true
+			return m, tea.Tick(6*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
+		}
+		if m.updateInfo != nil {
+			m.updateInfo.UpdateAvailable = false
+		}
+		m.statusMsg = fmt.Sprintf("Updated to %s! Restart db-manager to use the new version.", msg.version)
+		m.statusIsErr = false
+		return m, nil
 
 	case tea.MouseMsg:
 		switch m.mode {

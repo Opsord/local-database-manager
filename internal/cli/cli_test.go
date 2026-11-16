@@ -80,6 +80,21 @@ func TestCLI_Help(t *testing.T) {
 	if !strings.Contains(stdout.String(), "Usage:") {
 		t.Errorf("expected usage output, got: %s", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "update") || !strings.Contains(stdout.String(), "version") {
+		t.Errorf("expected usage to document update and version commands, got: %s", stdout.String())
+	}
+}
+
+func TestCLI_Version(t *testing.T) {
+	t.Parallel()
+	var stdout, stderr bytes.Buffer
+	code := RunWithOutput(".", config.Config{}, []string{"version"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("expected code 0, got %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Local Database Manager") {
+		t.Errorf("unexpected version output: %s", stdout.String())
+	}
 }
 
 func TestCLI_UnknownCommand(t *testing.T) {

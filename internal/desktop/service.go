@@ -11,9 +11,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Opsord/local-database-manager/internal/config"
 	"github.com/Opsord/local-database-manager/internal/core"
+	"github.com/Opsord/local-database-manager/internal/updater"
+	"github.com/Opsord/local-database-manager/internal/version"
 )
 
 // EventEmitter delivers backend events to the UI layer (Wails runtime in production, stub in tests).
@@ -21,6 +24,8 @@ type EventEmitter func(event string, data ...any)
 
 // AppMetadata exposes workspace configuration and supported engine versions to the frontend.
 type AppMetadata struct {
+	AppVersion              string   `json:"app_version"`
+	CheckUpdates            bool     `json:"check_updates"`
 	ProjectRoot             string   `json:"project_root"`
 	InstancesDir            string   `json:"instances_dir"`
 	PostgresVersions        []string `json:"postgres_versions"`
@@ -28,6 +33,13 @@ type AppMetadata struct {
 	DefaultPostgresVersion  string   `json:"default_postgres_version"`
 	DefaultSQLServerVersion string   `json:"default_sqlserver_version"`
 	EngineHealthIntervalMs  int64    `json:"engine_health_interval_ms"`
+}
+
+// UpdateProgressEvent is emitted while downloading, verifying, and installing an app update.
+type UpdateProgressEvent struct {
+	Stage   string `json:"stage"`
+	Percent int    `json:"percent"`
+	Message string `json:"message"`
 }
 
 // InstanceDTO is the JSON-serializable instance view returned to the desktop UI.
@@ -117,6 +129,13 @@ type Service struct {
 	logMu       sync.Mutex
 	logStreamID uint64
 	logCmd      *exec.Cmd
+
+	quitMu sync.RWMutex
+	quitFn func()
+
+	updateMu      sync.Mutex
+	lastUpdate    *updater.ReleaseInfo
+	updateBaseURL string
 }
 
 // NewService constructs a desktop Service for projectRoot.
@@ -140,6 +159,13 @@ func (s *Service) SetEventEmitter(fn EventEmitter) {
 	s.emitter = fn
 }
 
+// SetQuitFunc registers the callback used to close the desktop window cleanly (e.g. after updating).
+func (s *Service) SetQuitFunc(fn func()) {
+	s.quitMu.Lock()
+	defer s.quitMu.Unlock()
+	s.quitFn = fn
+}
+
 func (s *Service) emit(event string, data ...any) {
 	s.emitMu.RLock()
 	fn := s.emitter
@@ -156,6 +182,8 @@ func (s *Service) GetAppMetadata() AppMetadata {
 		intervalMs = 5000
 	}
 	return AppMetadata{
+		AppVersion:              version.Display(),
+		CheckUpdates:            s.cfg.CheckUpdates,
 		ProjectRoot:             s.projectRoot,
 		InstancesDir:            s.instancesDir,
 		PostgresVersions:        append([]string(nil), core.PostgresVersions...),
@@ -780,4 +808,99 @@ func (s *Service) OpenEnvInEditor(name string) error {
 // Shutdown releases background log streams on application exit.
 func (s *Service) Shutdown() {
 	_ = s.StopLogStream()
+}
+
+// CheckForUpdates checks GitHub Releases for a newer desktop release and caches the result.
+func (s *Service) CheckForUpdates() (updater.ReleaseInfo, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	s.updateMu.Lock()
+	baseURL := s.updateBaseURL
+	s.updateMu.Unlock()
+
+	info, err := updater.Check(ctx, updater.CheckOptions{
+		Target:            updater.TargetDesktop,
+		IncludePrerelease: s.cfg.UpdateChannel == "prerelease",
+		BaseURL:           baseURL,
+	})
+	if err != nil {
+		return updater.ReleaseInfo{}, err
+	}
+
+	s.updateMu.Lock()
+	infoCopy := info
+	s.lastUpdate = &infoCopy
+	s.updateMu.Unlock()
+
+	return info, nil
+}
+
+// ApplyUpdate downloads, verifies, and installs the cached (or newly checked) desktop release.
+func (s *Service) ApplyUpdate() error {
+	s.updateMu.Lock()
+	cached := s.lastUpdate
+	s.updateMu.Unlock()
+
+	var info updater.ReleaseInfo
+	if cached != nil {
+		info = *cached
+	} else {
+		checked, err := s.CheckForUpdates()
+		if err != nil {
+			return err
+		}
+		info = checked
+	}
+
+	if !info.UpdateAvailable {
+		return fmt.Errorf("already running the latest version (%s)", info.CurrentVersion)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	err := updater.Apply(ctx, info, updater.ApplyOptions{
+		OnProgress: func(stage updater.ProgressStage, percent int, msg string) {
+			s.emit("update:progress", UpdateProgressEvent{
+				Stage:   string(stage),
+				Percent: percent,
+				Message: msg,
+			})
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	s.updateMu.Lock()
+	if s.lastUpdate != nil {
+		s.lastUpdate.UpdateAvailable = false
+	}
+	s.updateMu.Unlock()
+
+	return nil
+}
+
+// RestartApp closes active log streams, launches a new instance of the executable, and exits.
+func (s *Service) RestartApp() error {
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("locate executable for restart: %w", err)
+	}
+
+	s.Shutdown()
+
+	cmd := exec.Command(exePath)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("relaunch desktop application: %w", err)
+	}
+
+	s.quitMu.RLock()
+	quitFn := s.quitFn
+	s.quitMu.RUnlock()
+	if quitFn != nil {
+		quitFn()
+	}
+	return nil
 }

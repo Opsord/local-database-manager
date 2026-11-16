@@ -10,11 +10,14 @@ import (
 	"github.com/Opsord/local-database-manager/internal/cli"
 	"github.com/Opsord/local-database-manager/internal/config"
 	"github.com/Opsord/local-database-manager/internal/logger"
+	"github.com/Opsord/local-database-manager/internal/updater"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 func main() {
+	updater.CleanupOldBinary()
+
 	projectRoot, rootErr := dbmanager.ResolveWorkspace()
 	if rootErr != nil {
 		fmt.Fprintf(os.Stderr, "Error initializing workspace: %v\n", rootErr)
