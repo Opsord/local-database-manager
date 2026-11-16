@@ -104,7 +104,7 @@ func (u *unsupportedProvider) Health(ctx context.Context) EngineHealth {
 	}
 	cmdCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(cmdCtx, bin, "info")
+	cmd := hiddenCommandContext(cmdCtx, bin, "info")
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	if err := cmd.Run(); err != nil {
@@ -167,5 +167,5 @@ func (u *unsupportedProvider) GetMemoryUsage(ctx context.Context, inst *Database
 }
 
 func (u *unsupportedProvider) LogsCommand(inst *DatabaseInstance) *exec.Cmd {
-	return exec.Command(u.name, "logs", inst.ContainerName)
+	return hiddenCommand(u.name, "logs", inst.ContainerName)
 }

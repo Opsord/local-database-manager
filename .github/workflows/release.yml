@@ -48,3 +48,124 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release-desktop:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: Windows_x86_64
+            goos: windows
+            ext: zip
+          - os: ubuntu-latest
+            target: Linux_x86_64
+            goos: linux
+            ext: tar.gz
+          - os: macos-latest
+            target: Darwin_arm64
+            goos: darwin
+            ext: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Build desktop frontend
+        run: |
+          pnpm --dir frontend install --frozen-lockfile
+          pnpm --dir frontend run build
+
+      - name: Install Linux WebKit dependencies
+        if: matrix.goos == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Build and package Windows desktop archive
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist-desktop/instances | Out-Null
+          go build -tags "desktop,production" -ldflags "-s -w -H windowsgui" -o dist-desktop/db-manager-desktop.exe ./cmd/db-manager-desktop
+          Copy-Item README.md, LICENSE, config.yml dist-desktop/
+          Copy-Item -Recurse engines dist-desktop/engines
+          Copy-Item instances/.env.template dist-desktop/instances/.env.template
+          $archive = "db-manager-desktop_${{ matrix.target }}.zip"
+          Compress-Archive -Path dist-desktop/* -DestinationPath $archive -Force
+          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
+          "$hash  $archive" | Out-File -Encoding ascii "$archive.sha256"
+
+      - name: Build and package Linux desktop archive
+        if: matrix.goos == 'linux'
+        shell: bash
+        run: |
+          mkdir -p dist-desktop/instances
+          go build -tags "desktop,production,webkit2_41" -ldflags "-s -w" -o dist-desktop/db-manager-desktop ./cmd/db-manager-desktop
+          cp README.md LICENSE config.yml dist-desktop/
+          cp -r engines dist-desktop/engines
+          cp instances/.env.template dist-desktop/instances/.env.template
+          ARCHIVE="db-manager-desktop_${{ matrix.target }}.tar.gz"
+          tar -czf "$ARCHIVE" -C dist-desktop .
+          sha256sum "$ARCHIVE" > "${ARCHIVE}.sha256"
+
+      - name: Build and package macOS desktop archive
+        if: matrix.goos == 'darwin'
+        shell: bash
+        run: |
+          mkdir -p dist-desktop/instances
+          mkdir -p dist-desktop/db-manager-desktop.app/Contents/MacOS
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -tags "desktop,production" -ldflags "-s -w" -o dist-desktop/db-manager-desktop.app/Contents/MacOS/db-manager-desktop ./cmd/db-manager-desktop
+          cat << 'EOF' > dist-desktop/db-manager-desktop.app/Contents/Info.plist
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key>
+            <string>db-manager-desktop</string>
+            <key>CFBundleIdentifier</key>
+            <string>io.github.opsord.dbmanager</string>
+            <key>CFBundleName</key>
+            <string>Local Database Manager</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleShortVersionString</key>
+            <string>${{ github.ref_name }}</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+          cp README.md LICENSE config.yml dist-desktop/
+          cp -r engines dist-desktop/engines
+          cp instances/.env.template dist-desktop/instances/.env.template
+          ARCHIVE="db-manager-desktop_${{ matrix.target }}.zip"
+          (cd dist-desktop && zip -r "../$ARCHIVE" .)
+          shasum -a 256 "$ARCHIVE" > "${ARCHIVE}.sha256"
+
+      - name: Upload desktop artifacts to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.ref_name }}" \
+            "db-manager-desktop_${{ matrix.target }}.${{ matrix.ext }}" \
+            "db-manager-desktop_${{ matrix.target }}.${{ matrix.ext }}.sha256" \
+            --clobber

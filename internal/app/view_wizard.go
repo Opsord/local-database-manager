@@ -2,11 +2,8 @@ package app
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/Opsord/local-database-manager/internal/core"
@@ -465,10 +462,7 @@ func (w *wizardModel) applyNameAutofill() {
 }
 
 func engineDefaults(engine string) (prefix, volPrefix, port, pass, mem string) {
-	if engine == "sqlserver" {
-		return "sql", "sqlserver", "1433", "SuperPassword123!", "2G"
-	}
-	return "pg", "pgdata", "5432", "postgres", "512M"
+	return core.EngineDefaults(engine)
 }
 
 func (w *wizardModel) applyEngineDefaults(prevEngine, nextEngine string) {
@@ -730,132 +724,49 @@ func (w *wizardModel) nameTaken(name string) bool {
 }
 
 func (w *wizardModel) saveInstance() error {
-	name := core.SanitizeIdent(w.inputs[0].Value())
-	containerName := core.SanitizeIdent(w.inputs[1].Value())
-	port := strings.TrimSpace(w.inputs[2].Value())
-	db := core.SanitizeIdent(w.inputs[3].Value())
-	pass := strings.TrimSpace(w.inputs[4].Value())
-	memLimit := strings.TrimSpace(w.inputs[5].Value())
-	if memLimit == "" {
-		memLimit = "512M"
-	}
-	if name != "" {
-		w.inputs[0].SetValue(name)
-	}
-	if containerName != "" {
-		w.inputs[1].SetValue(containerName)
-	}
-	if db != "" {
-		w.inputs[3].SetValue(db)
+	kind := "create"
+	if w.kind == wizardEdit {
+		kind = "edit"
 	}
 
-	engine := w.engines[w.selectedEngineIdx]
-	runtime := w.runtimes[w.selectedRuntimeIdx]
-	volume := w.derivedVolume()
-
-	var content string
-	if engine == "postgres" {
-		user := "postgres"
-		schema := "public"
-		if w.kind == wizardEdit && engine == w.sourceEngine {
-			if strings.TrimSpace(w.sourceUser) != "" {
-				user = w.sourceUser
-			}
-			if strings.TrimSpace(w.sourceSchema) != "" {
-				schema = w.sourceSchema
-			}
-		}
-		version := w.selectedVersion()
-		content = fmt.Sprintf(`ENGINE=postgres
-RUNTIME=%s
-
-CONTAINER_NAME=%s
-COMPOSE_PROJECT_NAME=%s
-MEMORY_LIMIT=%s
-
-POSTGRES_PORT=%s
-POSTGRES_USER=%s
-POSTGRES_PASSWORD=%s
-POSTGRES_DB=%s
-POSTGRES_SCHEMA=%s
-POSTGRES_VERSION=%s
-POSTGRES_VOLUME=%s
-`, runtime, containerName, containerName, memLimit, port, user, pass, db, schema, version, volume)
-	} else {
-		schema := "dbo"
-		if w.kind == wizardEdit && engine == w.sourceEngine && strings.TrimSpace(w.sourceSchema) != "" {
-			schema = w.sourceSchema
-		}
-		version := w.selectedVersion()
-		image := core.SQLServerImageForVersion(version)
-		content = fmt.Sprintf(`ENGINE=sqlserver
-RUNTIME=%s
-
-CONTAINER_NAME=%s
-COMPOSE_PROJECT_NAME=%s
-MEMORY_LIMIT=%s
-
-SQLSERVER_PORT=%s
-SA_PASSWORD=%s
-SQLSERVER_DB=%s
-SQLSERVER_SCHEMA=%s
-SQLSERVER_VOLUME=%s
-SQLSERVER_VERSION=%s
-SQLSERVER_IMAGE=%s
-`, runtime, containerName, containerName, memLimit, port, pass, db, schema, volume, version, image)
-	}
-
-	if w.kind == wizardEdit && len(w.sourceRawEnv) > 0 {
-		managedKeys := map[string]bool{
-			"ENGINE": true, "RUNTIME": true, "CONTAINER_NAME": true, "COMPOSE_PROJECT_NAME": true, "MEMORY_LIMIT": true,
-			"POSTGRES_PORT": true, "POSTGRES_USER": true, "POSTGRES_PASSWORD": true, "POSTGRES_DB": true,
-			"POSTGRES_SCHEMA": true, "POSTGRES_VERSION": true, "POSTGRES_VOLUME": true,
-			"SQLSERVER_PORT": true, "SA_PASSWORD": true, "MSSQL_SA_PASSWORD": true, "SQLSERVER_DB": true, "MSSQL_DB": true,
-			"SQLSERVER_SCHEMA": true, "SQLSERVER_VOLUME": true, "SQLSERVER_VERSION": true, "SQLSERVER_IMAGE": true,
-		}
-		var extras []string
-		for k, v := range w.sourceRawEnv {
-			if !managedKeys[k] {
-				extras = append(extras, fmt.Sprintf("%s=%s", k, formatEnvValue(v)))
-			}
-		}
-		if len(extras) > 0 {
-			sort.Strings(extras)
-			content += "\n" + strings.Join(extras, "\n") + "\n"
-		}
-	}
-
-	newPath := filepath.Join(w.instancesDir, fmt.Sprintf("%s.env", name))
-	if err := os.WriteFile(newPath, []byte(content), 0644); err != nil {
+	res, err := core.SaveInstanceEnv(w.instancesDir, core.InstanceFormSpec{
+		Kind:          kind,
+		SourceName:    w.sourceName,
+		SourceEnvPath: w.sourceEnvPath,
+		SourceEngine:  w.sourceEngine,
+		SourceVolume:  w.sourceVolume,
+		SourceUser:    w.sourceUser,
+		SourceSchema:  w.sourceSchema,
+		SourceRawEnv:  w.sourceRawEnv,
+		WasRunning:    w.wasRunning,
+		Engine:        w.engines[w.selectedEngineIdx],
+		Runtime:       w.runtimes[w.selectedRuntimeIdx],
+		Version:       w.selectedVersion(),
+		Name:          w.inputs[0].Value(),
+		ContainerName: w.inputs[1].Value(),
+		Port:          w.inputs[2].Value(),
+		Database:      w.inputs[3].Value(),
+		Password:      w.inputs[4].Value(),
+		MemoryLimit:   w.inputs[5].Value(),
+	})
+	if err != nil {
 		return err
 	}
-	if w.kind == wizardEdit && newPath != w.sourceEnvPath {
-		if w.wasRunning {
-			w.sourceEnvPath = newPath
-			w.sourceName = name
-		} else {
-			if err := os.Remove(w.sourceEnvPath); err != nil && !os.IsNotExist(err) {
-				return err
-			}
-			w.sourceEnvPath = newPath
-			w.sourceName = name
-		}
+
+	if res.Name != "" {
+		w.inputs[0].SetValue(res.Name)
+	}
+	if res.ContainerName != "" {
+		w.inputs[1].SetValue(res.ContainerName)
+	}
+	if res.Database != "" {
+		w.inputs[3].SetValue(res.Database)
+	}
+	if w.kind == wizardEdit && res.EnvPath != w.sourceEnvPath {
+		w.sourceEnvPath = res.EnvPath
+		w.sourceName = res.Name
 	}
 	return nil
-}
-
-func formatEnvValue(v string) string {
-	needsQuotes := strings.Contains(v, "#") || v != strings.TrimSpace(v)
-	if !needsQuotes {
-		return v
-	}
-	if !strings.Contains(v, `"`) {
-		return `"` + v + `"`
-	}
-	if !strings.Contains(v, `'`) {
-		return `'` + v + `'`
-	}
-	return v
 }
 
 func (m *AppModel) wizardPreviewRow(inner int, label, value string) string {

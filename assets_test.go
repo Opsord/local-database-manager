@@ -44,3 +44,24 @@ func TestEnsureWorkspace(t *testing.T) {
 		t.Errorf("config.yml was overwritten: got %q, want %q", string(got), customCfg)
 	}
 }
+
+func TestHasEnginesAndInstances(t *testing.T) {
+	dir := t.TempDir()
+	if HasEnginesAndInstances(dir) {
+		t.Fatalf("expected false for empty directory %s", dir)
+	}
+
+	if err := os.Mkdir(filepath.Join(dir, "engines"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if HasEnginesAndInstances(dir) {
+		t.Fatalf("expected false when only engines/ exists")
+	}
+
+	if err := os.Mkdir(filepath.Join(dir, "instances"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !HasEnginesAndInstances(dir) {
+		t.Fatalf("expected true when both engines/ and instances/ exist")
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -289,4 +290,197 @@ func (d *DatabaseInstance) CLICommand() string {
 	default:
 		return ""
 	}
+}
+
+// EngineDefaults returns default prefix, volume prefix, port, password, and memory limit for an engine.
+func EngineDefaults(engine string) (prefix, volPrefix, port, pass, mem string) {
+	if strings.ToLower(strings.TrimSpace(engine)) == "sqlserver" {
+		return "sql", "sqlserver", "1433", "SuperPassword123!", "2G"
+	}
+	return "pg", "pgdata", "5432", "postgres", "512M"
+}
+
+// InstanceFormSpec defines the parameters required to create or update an instance .env file.
+type InstanceFormSpec struct {
+	Kind          string // "create" | "edit"
+	SourceName    string
+	SourceEnvPath string
+	SourceEngine  string
+	SourceVolume  string
+	SourceUser    string
+	SourceSchema  string
+	SourceRawEnv  map[string]string
+	WasRunning    bool
+
+	Engine        string
+	Runtime       string
+	Version       string
+	Name          string
+	ContainerName string
+	Port          string
+	Database      string
+	Password      string
+	MemoryLimit   string
+}
+
+// SaveInstanceResult summarizes the outcome of SaveInstanceEnv.
+type SaveInstanceResult struct {
+	Name               string
+	ContainerName      string
+	Database           string
+	EnvPath            string
+	DerivedVolume      string
+	VolumeChanged      bool
+	NeedsRestartPrompt bool
+	CleanupOldEnvPath  string
+}
+
+// SaveInstanceEnv writes or updates an instance .env configuration inside instancesDir.
+func SaveInstanceEnv(instancesDir string, spec InstanceFormSpec) (SaveInstanceResult, error) {
+	name := SanitizeIdent(spec.Name)
+	if name == "" {
+		return SaveInstanceResult{}, fmt.Errorf("instance name cannot be empty")
+	}
+
+	engine := strings.ToLower(strings.TrimSpace(spec.Engine))
+	if engine != "sqlserver" {
+		engine = "postgres"
+	}
+
+	runtimeName := strings.ToLower(strings.TrimSpace(spec.Runtime))
+	if runtimeName != "podman" {
+		runtimeName = "docker"
+	}
+
+	containerName := SanitizeIdent(spec.ContainerName)
+	db := SanitizeIdent(spec.Database)
+	port := strings.TrimSpace(spec.Port)
+	pass := strings.TrimSpace(spec.Password)
+	memLimit := strings.TrimSpace(spec.MemoryLimit)
+	if memLimit == "" {
+		memLimit = "512M"
+	}
+
+	var versionForVolume string
+	if engine == "postgres" {
+		versionForVolume = spec.Version
+	}
+	volume := DeriveVolumeName(engine, name, versionForVolume)
+
+	var content string
+	if engine == "postgres" {
+		user := "postgres"
+		schema := "public"
+		if spec.Kind == "edit" && engine == spec.SourceEngine {
+			if strings.TrimSpace(spec.SourceUser) != "" {
+				user = spec.SourceUser
+			}
+			if strings.TrimSpace(spec.SourceSchema) != "" {
+				schema = spec.SourceSchema
+			}
+		}
+		version := NormalizePostgresVersion(spec.Version)
+		content = fmt.Sprintf(`ENGINE=postgres
+RUNTIME=%s
+
+CONTAINER_NAME=%s
+COMPOSE_PROJECT_NAME=%s
+MEMORY_LIMIT=%s
+
+POSTGRES_PORT=%s
+POSTGRES_USER=%s
+POSTGRES_PASSWORD=%s
+POSTGRES_DB=%s
+POSTGRES_SCHEMA=%s
+POSTGRES_VERSION=%s
+POSTGRES_VOLUME=%s
+`, runtimeName, containerName, containerName, memLimit, port, user, pass, db, schema, version, volume)
+	} else {
+		schema := "dbo"
+		if spec.Kind == "edit" && engine == spec.SourceEngine && strings.TrimSpace(spec.SourceSchema) != "" {
+			schema = spec.SourceSchema
+		}
+		version := NormalizeSQLServerVersion(spec.Version)
+		image := SQLServerImageForVersion(version)
+		content = fmt.Sprintf(`ENGINE=sqlserver
+RUNTIME=%s
+
+CONTAINER_NAME=%s
+COMPOSE_PROJECT_NAME=%s
+MEMORY_LIMIT=%s
+
+SQLSERVER_PORT=%s
+SA_PASSWORD=%s
+SQLSERVER_DB=%s
+SQLSERVER_SCHEMA=%s
+SQLSERVER_VOLUME=%s
+SQLSERVER_VERSION=%s
+SQLSERVER_IMAGE=%s
+`, runtimeName, containerName, containerName, memLimit, port, pass, db, schema, volume, version, image)
+	}
+
+	if spec.Kind == "edit" && len(spec.SourceRawEnv) > 0 {
+		managedKeys := map[string]bool{
+			"ENGINE": true, "RUNTIME": true, "CONTAINER_NAME": true, "COMPOSE_PROJECT_NAME": true, "MEMORY_LIMIT": true,
+			"POSTGRES_PORT": true, "POSTGRES_USER": true, "POSTGRES_PASSWORD": true, "POSTGRES_DB": true,
+			"POSTGRES_SCHEMA": true, "POSTGRES_VERSION": true, "POSTGRES_VOLUME": true,
+			"SQLSERVER_PORT": true, "SA_PASSWORD": true, "MSSQL_SA_PASSWORD": true, "SQLSERVER_DB": true, "MSSQL_DB": true,
+			"SQLSERVER_SCHEMA": true, "SQLSERVER_VOLUME": true, "SQLSERVER_VERSION": true, "SQLSERVER_IMAGE": true,
+		}
+		var extras []string
+		for k, v := range spec.SourceRawEnv {
+			if !managedKeys[k] {
+				extras = append(extras, fmt.Sprintf("%s=%s", k, formatEnvValue(v)))
+			}
+		}
+		if len(extras) > 0 {
+			sort.Strings(extras)
+			content += "\n" + strings.Join(extras, "\n") + "\n"
+		}
+	}
+
+	if err := os.MkdirAll(instancesDir, 0o755); err != nil {
+		return SaveInstanceResult{}, fmt.Errorf("create instances directory: %w", err)
+	}
+
+	newPath := filepath.Join(instancesDir, fmt.Sprintf("%s.env", name))
+	if err := os.WriteFile(newPath, []byte(content), 0644); err != nil {
+		return SaveInstanceResult{}, err
+	}
+
+	res := SaveInstanceResult{
+		Name:               name,
+		ContainerName:      containerName,
+		Database:           db,
+		EnvPath:            newPath,
+		DerivedVolume:      volume,
+		VolumeChanged:      spec.Kind == "edit" && spec.SourceVolume != volume,
+		NeedsRestartPrompt: spec.Kind == "edit" && spec.WasRunning,
+	}
+
+	if spec.Kind == "edit" && spec.SourceEnvPath != "" && newPath != spec.SourceEnvPath {
+		if spec.WasRunning {
+			res.CleanupOldEnvPath = spec.SourceEnvPath
+		} else {
+			if err := os.Remove(spec.SourceEnvPath); err != nil && !os.IsNotExist(err) {
+				return SaveInstanceResult{}, err
+			}
+		}
+	}
+
+	return res, nil
+}
+
+func formatEnvValue(v string) string {
+	needsQuotes := strings.Contains(v, "#") || v != strings.TrimSpace(v)
+	if !needsQuotes {
+		return v
+	}
+	if !strings.Contains(v, `"`) {
+		return `"` + v + `"`
+	}
+	if !strings.Contains(v, `'`) {
+		return `'` + v + `'`
+	}
+	return v
 }

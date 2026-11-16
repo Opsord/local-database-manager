@@ -18,8 +18,33 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Build desktop frontend
+        run: |
+          pnpm --dir frontend install --frozen-lockfile
+          pnpm --dir frontend run build
+
+      - name: Install Linux WebKit dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
       - name: Run tests
         run: go test ./... -v
 
-      - name: Build binary
+      - name: Build CLI/TUI binary
         run: go build ./cmd/db-manager
+
+      - name: Build Desktop binary
+        run: go build -tags "desktop,production,webkit2_41" ./cmd/db-manager-desktop

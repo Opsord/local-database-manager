@@ -37,7 +37,7 @@ func (p *DockerProvider) Health(ctx context.Context) EngineHealth {
 	cmdCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "docker", "info")
+	cmd := hiddenCommandContext(cmdCtx, "docker", "info")
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	if err := cmd.Run(); err != nil {
@@ -114,7 +114,7 @@ func (p *DockerProvider) Start(ctx context.Context, inst *DatabaseInstance) erro
 	slog.Info("Starting Docker instance", "name", inst.Name, "container", inst.ContainerName)
 
 	bin, args := p.BuildComposeArgs(inst, "up", "-d")
-	cmd := exec.CommandContext(cmdCtx, bin, args...)
+	cmd := hiddenCommandContext(cmdCtx, bin, args...)
 	if inst.EngineType == "postgres" && NormalizePostgresVersion(inst.Version) != "18" {
 		if inst.RawEnv == nil || strings.TrimSpace(inst.RawEnv["POSTGRES_PGDATA"]) == "" {
 			cmd.Env = append(os.Environ(), "POSTGRES_PGDATA=/var/lib/postgresql/pgdata")
@@ -139,7 +139,7 @@ func (p *DockerProvider) Stop(ctx context.Context, inst *DatabaseInstance) error
 	slog.Info("Stopping Docker instance", "name", inst.Name, "container", inst.ContainerName)
 
 	bin, args := p.BuildComposeArgs(inst, "down")
-	cmd := exec.CommandContext(cmdCtx, bin, args...)
+	cmd := hiddenCommandContext(cmdCtx, bin, args...)
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 
@@ -159,7 +159,7 @@ func (p *DockerProvider) DownVolumes(ctx context.Context, inst *DatabaseInstance
 	slog.Info("Purging Docker instance volumes", "name", inst.Name, "container", inst.ContainerName)
 
 	bin, args := p.BuildComposeArgs(inst, "down", "-v")
-	cmd := exec.CommandContext(cmdCtx, bin, args...)
+	cmd := hiddenCommandContext(cmdCtx, bin, args...)
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 
@@ -176,13 +176,13 @@ func (p *DockerProvider) CheckStatus(ctx context.Context, inst *DatabaseInstance
 	cmdCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "docker", "ps", "--filter", fmt.Sprintf("name=^/%s$|^%s$", inst.ContainerName, inst.ContainerName), "--format", "{{.State}}")
+	cmd := hiddenCommandContext(cmdCtx, "docker", "ps", "--filter", fmt.Sprintf("name=^/%s$|^%s$", inst.ContainerName, inst.ContainerName), "--format", "{{.State}}")
 	var outBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 
 	if err := cmd.Run(); err != nil {
 		bin, args := p.BuildComposeArgs(inst, "ps", "--format", "{{.State}}")
-		cmd = exec.CommandContext(cmdCtx, bin, args...)
+		cmd = hiddenCommandContext(cmdCtx, bin, args...)
 		cmd.Stdout = &outBuf
 		if err := cmd.Run(); err != nil {
 			return StatusStopped
@@ -208,7 +208,7 @@ func (p *DockerProvider) GetStats(ctx context.Context, inst *DatabaseInstance) C
 	cmdCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "docker", "stats", "--no-stream", "--format", "{{.CPUPerc}}\t{{.MemUsage}}", inst.ContainerName)
+	cmd := hiddenCommandContext(cmdCtx, "docker", "stats", "--no-stream", "--format", "{{.CPUPerc}}\t{{.MemUsage}}", inst.ContainerName)
 	var outBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 
@@ -242,5 +242,5 @@ func (p *DockerProvider) GetMemoryUsage(ctx context.Context, inst *DatabaseInsta
 // LogsCommand returns the command for streaming container logs.
 func (p *DockerProvider) LogsCommand(inst *DatabaseInstance) *exec.Cmd {
 	bin, args := p.BuildComposeArgs(inst, "logs", "--tail=100", "-f")
-	return exec.Command(bin, args...)
+	return hiddenCommand(bin, args...)
 }

@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root,
+[data-theme='zed-dark'] {
+  --bg-app: #181a1f;
+  --bg-surface: #1e222a;
+  --bg-panel: #21252b;
+  --bg-elevated: #282c34;
+  --bg-selected: #2c313c;
+  --bg-hover: #252932;
+  --border-subtle: #2e3440;
+  --border-active: #528bff;
+  --text-primary: #dcdfe4;
+  --text-secondary: #abb2bf;
+  --text-muted: #7f848e;
+  --accent-primary: #61afef;
+  --accent-secondary: #c678dd;
+  --accent-teal: #56b6c2;
+  --status-ready: #98c379;
+  --status-starting: #e5c07b;
+  --status-stopped: #e06c75;
+  --status-unknown: #7f848e;
+  --badge-bg: rgba(97, 175, 239, 0.12);
+  --copied-bg: rgba(86, 182, 194, 0.22);
+}
+
+[data-theme='night-owl'] {
+  --bg-app: #011627;
+  --bg-surface: #0b253a;
+  --bg-panel: #0d2137;
+  --bg-elevated: #122d46;
+  --bg-selected: #1d3b53;
+  --bg-hover: #153149;
+  --border-subtle: #1d3b53;
+  --border-active: #82aaff;
+  --text-primary: #d6deeb;
+  --text-secondary: #b5c6d8;
+  --text-muted: #5f7e97;
+  --accent-primary: #82aaff;
+  --accent-secondary: #c792ea;
+  --accent-teal: #7fdbca;
+  --status-ready: #addb67;
+  --status-starting: #ecc48d;
+  --status-stopped: #ef5350;
+  --status-unknown: #5f7e97;
+  --badge-bg: rgba(130, 170, 255, 0.14);
+  --copied-bg: rgba(127, 219, 202, 0.22);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* Zed-style ultra-clean scrollbars */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 5px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  line-height: 1.3;
+  color: var(--accent-primary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+}

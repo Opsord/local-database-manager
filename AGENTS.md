@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## Project Overview
-**Local Database Manager (`db-manager`)** is a lightweight, interactive Terminal User Interface (TUI) built with **Go** and the **Bubble Tea / Charm** ecosystem. It provides centralized lifecycle management (start, stop, logs, purge, connection strings, and instance creation) for local database containers running under **Docker** and **Podman**.
+**Local Database Manager (`db-manager`)** is a lightweight, interactive Terminal User Interface (TUI), headless CLI, and Desktop application (`db-manager-desktop`) built with **Go**, **Bubble Tea / Charm**, and **Wails v2 + React/Tailwind**. It provides centralized lifecycle management (start, stop, logs, purge, connection strings, and instance creation/editing) for local database containers running under **Docker** and **Podman**.
 
 ---
 
@@ -23,8 +23,14 @@ local-database-manager/
 │   └── .env.template                # Reference configuration template (tracked in git)
 │
 ├── cmd/
-│   └── db-manager/
-│       └── main.go                  # Entrypoint (TUI/CLI mode routing & root detection)
+│   ├── db-manager/
+│   │   └── main.go                  # Entrypoint (TUI/CLI mode routing & root detection)
+│   └── db-manager-desktop/
+│       └── main.go                  # Wails v2 Desktop GUI entrypoint
+│
+├── frontend/                        # Desktop UI (React + TypeScript + Tailwind via pnpm/Vite)
+│   ├── embed.go                     # Embeds frontend/dist for db-manager-desktop only
+│   └── src/                         # Zed-inspired UI components, themes & Wails bridge
 │
 ├── scripts/                         # Setup and automation helper scripts
 │   ├── setup-alias.ps1              # Windows PowerShell shortcut setup script
@@ -38,7 +44,7 @@ local-database-manager/
 │   ├── cli/
 │   │   └── cli.go                   # Headless CLI subcommands (list, start, stop, uri, env, logs)
 │   ├── core/                        # Core domain logic & runtime providers
-│   │   ├── instance.go              # DatabaseInstance model, .env parser & URI builder
+│   │   ├── instance.go              # DatabaseInstance model, .env parser, writer & URI builder
 │   │   ├── ports.go                 # Local socket availability & next free port finder
 │   │   ├── runner.go                # Runner facade delegating to RuntimeProvider
 │   │   ├── runtime_provider.go      # RuntimeProvider interface & daemon polling helpers
@@ -51,6 +57,9 @@ local-database-manager/
 │   │   ├── errors.go                # Domain error types & AppError
 │   │   ├── compose_error.go         # Compose/runtime stderr parser & hints
 │   │   └── clipboard.go             # Windows/OS clipboard & editor opener
+│   ├── desktop/                     # Decoupled Desktop backend service & tests
+│   │   ├── service.go               # Wails-bound service methods & async log streaming
+│   │   └── service_test.go          # Unit tests with mock InstanceRunner
 │   └── app/                         # Bubble Tea UI presentation layer
 │       ├── styles.go                # Lip Gloss styles, colors, and layout borders
 │       ├── helpers.go               # Layout calculations, detail rows & truncation
@@ -71,10 +80,10 @@ local-database-manager/
 ---
 
 ## Technical Stack & Libraries
-- **Language:** Go 1.22+
-- **TUI Framework:** `github.com/charmbracelet/bubbletea`
-- **Component Primitives:** `github.com/charmbracelet/bubbles` (`textinput`, `viewport`)
-- **Styling & Colors:** `github.com/charmbracelet/lipgloss`
+- **Language:** Go 1.26+
+- **TUI Framework:** `github.com/charmbracelet/bubbletea`, `bubbles`, `lipgloss`
+- **Desktop Framework:** `github.com/wailsapp/wails/v2` (native OS WebView2 / WebKit)
+- **Desktop Frontend:** React 18, TypeScript, Tailwind CSS, Vite (managed with `pnpm`)
 - **Clipboard Helper:** `github.com/atotto/clipboard` (with Windows `clip.exe` fallback)
 
 ---
@@ -111,4 +120,11 @@ go run ./cmd/db-manager
 ### Build Executable Binary
 ```bash
 go build -o db-manager.exe ./cmd/db-manager
+```
+
+### Build Desktop App (Frontend + Wails Binary)
+```bash
+pnpm --dir frontend install --frozen-lockfile
+pnpm --dir frontend run build
+go build -tags "desktop,production" -ldflags "-s -w -H windowsgui" -o db-manager-desktop.exe ./cmd/db-manager-desktop
 ```

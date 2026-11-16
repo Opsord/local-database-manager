@@ -33,8 +33,8 @@ go install github.com/Opsord/local-database-manager/cmd/db-manager@latest
 ```
 Run `db-manager` from any directory. On first launch, it automatically initializes `~/.db-manager` with default engine templates and `config.yml`.
 
-### Option 2: Precompiled Binaries
-Download the archive for Windows, macOS, or Linux from the [Releases](https://github.com/Opsord/local-database-manager/releases) page, extract it, and run `db-manager`.
+### Option 2: Precompiled Binaries (CLI/TUI & Desktop App)
+Download either the CLI/TUI archive (`db-manager_*`) or the native lightweight Wails Desktop app (`db-manager-desktop_*`) for Windows, macOS, or Linux from the [Releases](https://github.com/Opsord/local-database-manager/releases) page, extract it, and run `db-manager` or `db-manager-desktop`.
 
 ---
 
@@ -78,8 +78,12 @@ local-database-manager/
 │   └── .env.template                # Reference configuration template (tracked in git)
 │
 ├── cmd/
-│   └── db-manager/
-│       └── main.go                  # CLI entrypoint and project root detection
+│   ├── db-manager/
+│   │   └── main.go                  # CLI/TUI entrypoint and project root detection
+│   └── db-manager-desktop/
+│       └── main.go                  # Wails v2 Desktop GUI entrypoint
+│
+├── frontend/                        # Desktop UI (React + TypeScript + Tailwind via pnpm/Vite)
 │
 ├── scripts/                         # Setup and automation helper scripts
 │   ├── setup-alias.ps1              # Windows PowerShell shortcut setup script
@@ -87,6 +91,7 @@ local-database-manager/
 │
 ├── internal/
 │   ├── core/                        # Domain logic (instance model, parser, ports, runner)
+│   ├── desktop/                     # Desktop service bridge and unit tests
 │   └── app/                         # Bubble Tea UI presentation layer
 │
 ├── config.yml                       # App settings (engine health poll interval)
@@ -162,6 +167,15 @@ go run ./cmd/db-manager
 ```bash
 go build -o db-manager.exe ./cmd/db-manager
 ```
+
+### 3. Build Desktop App (`db-manager-desktop`)
+```bash
+pnpm --dir frontend install --frozen-lockfile
+pnpm --dir frontend run build
+go build -tags "desktop,production" -ldflags "-s -w -H windowsgui" -o db-manager-desktop.exe ./cmd/db-manager-desktop
+```
+
+- Uses native OS WebView (WebView2 on Windows, WebKit on macOS/Linux) with **Zed Dark** and **Night Owl** themes, Command Palette (`Ctrl+K`), live container logs, and 100% feature parity with the TUI.
 
 ---
 

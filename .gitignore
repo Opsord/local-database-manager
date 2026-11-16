@@ -6,6 +6,13 @@
 *.dylib
 /db-manager
 /db-manager.exe
+/db-manager-desktop
+/db-manager-desktop.exe
+
+# Frontend dependencies & built bundle (only dist/.keep is tracked)
+frontend/node_modules/
+frontend/dist/*
+!frontend/dist/.keep
 
 # Test binaries & Coverage
 *.test

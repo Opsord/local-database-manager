@@ -52,7 +52,7 @@ func stopDockerDaemon(ctx context.Context, checkHealth func(context.Context) Eng
 	// Only use the Docker CLI. Launching "Docker Desktop.exe --quit" can spawn a
 	// new Desktop process that reopens the tray/dashboard while the backend is
 	// still shutting down.
-	stopCmd := exec.CommandContext(cmdCtx, "docker", "desktop", "stop")
+	stopCmd := hiddenCommandContext(cmdCtx, "docker", "desktop", "stop")
 	stopCmd.Stdout = io.Discard
 	stopCmd.Stderr = io.Discard
 	_ = stopCmd.Run()

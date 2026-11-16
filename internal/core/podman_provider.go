@@ -44,7 +44,7 @@ func (p *PodmanProvider) Health(ctx context.Context) EngineHealth {
 	cmdCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "podman", "info")
+	cmd := hiddenCommandContext(cmdCtx, "podman", "info")
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	if err := cmd.Run(); err != nil {
@@ -116,7 +116,7 @@ func (p *PodmanProvider) StopDaemon(ctx context.Context) error {
 	cmdCtx, cancel := context.WithTimeout(ctx, engineStartTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "podman", "machine", "stop")
+	cmd := hiddenCommandContext(cmdCtx, "podman", "machine", "stop")
 	var stderr bytes.Buffer
 	cmd.Stdout = io.Discard
 	cmd.Stderr = &stderr
@@ -156,7 +156,7 @@ func (p *PodmanProvider) Start(ctx context.Context, inst *DatabaseInstance) erro
 		args = removeFlagWithValue(args, "--memory")
 	}
 
-	cmd := exec.CommandContext(cmdCtx, "podman", args...)
+	cmd := hiddenCommandContext(cmdCtx, "podman", args...)
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 	if err := cmd.Run(); err != nil {
@@ -169,7 +169,7 @@ func (p *PodmanProvider) Start(ctx context.Context, inst *DatabaseInstance) erro
 			p.mu.Unlock()
 
 			retryArgs := removeFlagWithValue(args, "--memory")
-			retryCmd := exec.CommandContext(cmdCtx, "podman", retryArgs...)
+			retryCmd := hiddenCommandContext(cmdCtx, "podman", retryArgs...)
 			var retryErrBuf bytes.Buffer
 			retryCmd.Stderr = &retryErrBuf
 			if retryErr := retryCmd.Run(); retryErr != nil {
@@ -219,7 +219,7 @@ func (p *PodmanProvider) CheckStatus(ctx context.Context, inst *DatabaseInstance
 	cmdCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "podman", "ps", "--filter", fmt.Sprintf("name=^/%s$|^%s$", inst.ContainerName, inst.ContainerName), "--format", "{{.State}}")
+	cmd := hiddenCommandContext(cmdCtx, "podman", "ps", "--filter", fmt.Sprintf("name=^/%s$|^%s$", inst.ContainerName, inst.ContainerName), "--format", "{{.State}}")
 	var outBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 
@@ -246,7 +246,7 @@ func (p *PodmanProvider) GetStats(ctx context.Context, inst *DatabaseInstance) C
 	cmdCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "podman", "stats", "--no-stream", "--format", "{{.CPUPerc}}\t{{.MemUsage}}", inst.ContainerName)
+	cmd := hiddenCommandContext(cmdCtx, "podman", "stats", "--no-stream", "--format", "{{.CPUPerc}}\t{{.MemUsage}}", inst.ContainerName)
 	var outBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 
@@ -279,7 +279,7 @@ func (p *PodmanProvider) GetMemoryUsage(ctx context.Context, inst *DatabaseInsta
 
 // LogsCommand prepares a command for streaming container logs.
 func (p *PodmanProvider) LogsCommand(inst *DatabaseInstance) *exec.Cmd {
-	return exec.Command("podman", "logs", "--tail=100", "-f", inst.ContainerName)
+	return hiddenCommand("podman", "logs", "--tail=100", "-f", inst.ContainerName)
 }
 
 // supportsCgroupMemory checks whether the Podman host has the cgroup memory controller enabled.
@@ -295,7 +295,7 @@ func (p *PodmanProvider) supportsCgroupMemory(ctx context.Context) bool {
 	cmdCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "podman", "info", "--format", "{{json .Host.CgroupControllers}}")
+	cmd := hiddenCommandContext(cmdCtx, "podman", "info", "--format", "{{json .Host.CgroupControllers}}")
 	out, err := cmd.Output()
 	supported := false
 	if err == nil {
@@ -433,7 +433,7 @@ func (p *PodmanProvider) buildPodmanRunArgs(inst *DatabaseInstance) ([]string, e
 }
 
 func (p *PodmanProvider) stopPodmanContainer(ctx context.Context, inst *DatabaseInstance) error {
-	cmd := exec.CommandContext(ctx, "podman", "rm", "-f", inst.ContainerName)
+	cmd := hiddenCommandContext(ctx, "podman", "rm", "-f", inst.ContainerName)
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 	if err := cmd.Run(); err != nil {
@@ -458,7 +458,7 @@ func (p *PodmanProvider) purgePodmanContainer(ctx context.Context, inst *Databas
 	if vol == "" {
 		return nil
 	}
-	cmd := exec.CommandContext(ctx, "podman", "volume", "rm", "-f", vol)
+	cmd := hiddenCommandContext(ctx, "podman", "volume", "rm", "-f", vol)
 	_ = cmd.Run() // volume may already be gone
 	return nil
 }
@@ -474,7 +474,7 @@ func (p *PodmanProvider) removeStaleRootfulContainer(ctx context.Context, name s
 	if err != nil || host == "" {
 		return
 	}
-	cmd := exec.CommandContext(ctx, "docker", "rm", "-f", name)
+	cmd := hiddenCommandContext(ctx, "docker", "rm", "-f", name)
 	cmd.Env = append(os.Environ(), "DOCKER_HOST="+host)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
@@ -482,7 +482,7 @@ func (p *PodmanProvider) removeStaleRootfulContainer(ctx context.Context, name s
 }
 
 func (p *PodmanProvider) execPodmanMachine(ctx context.Context, subcmd string) (stderr string, err error) {
-	cmd := exec.CommandContext(ctx, "podman", "machine", subcmd)
+	cmd := hiddenCommandContext(ctx, "podman", "machine", subcmd)
 	var errBuf bytes.Buffer
 	cmd.Stdout = io.Discard
 	cmd.Stderr = &errBuf
@@ -510,7 +510,7 @@ func pickPodmanConnectionToDefault(conns []podmanSystemConnection, working map[s
 }
 
 func (p *PodmanProvider) listPodmanConnections(ctx context.Context) ([]podmanSystemConnection, error) {
-	cmd := exec.CommandContext(ctx, "podman", "system", "connection", "list", "--format", "json")
+	cmd := hiddenCommandContext(ctx, "podman", "system", "connection", "list", "--format", "json")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -529,14 +529,14 @@ func (p *PodmanProvider) podmanInfoOK(ctx context.Context, connection string) bo
 	if connection != "" {
 		args = []string{"--connection", connection, "info"}
 	}
-	cmd := exec.CommandContext(ctx, "podman", args...)
+	cmd := hiddenCommandContext(ctx, "podman", args...)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	return cmd.Run() == nil
 }
 
 func (p *PodmanProvider) setPodmanDefaultConnection(ctx context.Context, name string) error {
-	cmd := exec.CommandContext(ctx, "podman", "system", "connection", "default", name)
+	cmd := hiddenCommandContext(ctx, "podman", "system", "connection", "default", name)
 	var stderr bytes.Buffer
 	cmd.Stdout = io.Discard
 	cmd.Stderr = &stderr
@@ -582,7 +582,7 @@ type podmanMachineInspect struct {
 }
 
 func (p *PodmanProvider) podmanMachineDOCKERHost(ctx context.Context) (string, error) {
-	cmd := exec.CommandContext(ctx, "podman", "machine", "inspect")
+	cmd := hiddenCommandContext(ctx, "podman", "machine", "inspect")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
