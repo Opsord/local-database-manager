@@ -226,15 +226,120 @@ func (m *AppModel) handleDetailsMouseAt(msg tea.MouseMsg, now time.Time) (tea.Mo
 	}
 	if err := copyToClipboard(text); err != nil {
 		m.clearCopiedHit()
-		m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
-		m.statusIsErr = true
-	} else {
-		if h, ok := findCopyHit(m.detailHits, msg.X, msg.Y); ok {
-			cp := h
-			m.copiedHit = &cp
-		}
-		m.statusMsg = fmt.Sprintf("Copied: %s", text)
-		m.statusIsErr = false
+		m.setError(fmt.Sprintf("Failed to copy: %v", err))
+		return m, nil, true
 	}
+	if h, ok := findCopyHit(m.detailHits, msg.X, msg.Y); ok {
+		cp := h
+		m.copiedHit = &cp
+	}
+	m.statusMsg = fmt.Sprintf("Copied: %s", text)
+	m.statusIsErr = false
 	return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }), true
+}
+
+const (
+	statusPrefixText       = "Status: "
+	statusSelectButtonText = "[v] Select"
+	statusCopyButtonText   = "[C] Copy"
+)
+
+type statusErrorLayout struct {
+	shownMsg  string
+	showBtns  bool
+	textHit   copyHit
+	selectHit copyHit
+	copyHit   copyHit
+}
+
+func (m *AppModel) statusBarRowY() int {
+	contentHeight := mainContentHeight(m.height)
+	mainH := contentHeight + 2
+	if m.mode != ModeEngineMenu {
+		listCount := len(m.filteredInstances())
+		if m.isFiltering {
+			listCount += 2
+		}
+		if listCount+1 > contentHeight {
+			if expanded := listCount + 1 + 2; expanded > mainH {
+				mainH = expanded
+			}
+		}
+	}
+	return 1 + mainH
+}
+
+func buildStatusErrorLayout(footerInner, statusRowY int, msg string) statusErrorLayout {
+	const (
+		prefixX = 2 // wrapScreen Padding(0,1) + StatusBarStyle Padding(0,1)
+		prefixW = 8 // len("Status: ")
+		gapW    = 2
+	)
+	textX := prefixX + prefixW
+	btnBlockW := gapW + len(statusSelectButtonText) + gapW + len(statusCopyButtonText)
+	availMsgW := footerInner - prefixW - btnBlockW
+	if availMsgW < 10 {
+		shown := truncateEnd(msg, max(1, footerInner-prefixW))
+		return statusErrorLayout{
+			shownMsg: shown,
+			showBtns: false,
+			textHit:  copyHit{X: textX, Y: statusRowY, W: displayWidth(shown), H: 1, Text: msg},
+		}
+	}
+
+	shown := truncateEnd(msg, availMsgW)
+	shownW := displayWidth(shown)
+	selectX := textX + shownW + gapW
+	copyX := selectX + len(statusSelectButtonText) + gapW
+	return statusErrorLayout{
+		shownMsg:  shown,
+		showBtns:  true,
+		textHit:   copyHit{X: textX, Y: statusRowY, W: shownW, H: 1, Text: msg},
+		selectHit: copyHit{X: selectX, Y: statusRowY, W: len(statusSelectButtonText), H: 1, Text: statusSelectButtonText},
+		copyHit:   copyHit{X: copyX, Y: statusRowY, W: len(statusCopyButtonText), H: 1, Text: msg},
+	}
+}
+
+func pointInHit(h copyHit, x, y int) bool {
+	return h.W > 0 && h.H > 0 && y >= h.Y && y < h.Y+h.H && x >= h.X && x < h.X+h.W
+}
+
+func (m *AppModel) handleStatusErrorMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
+	return m.handleStatusErrorMouseAt(msg, time.Now())
+}
+
+func (m *AppModel) handleStatusErrorMouseAt(msg tea.MouseMsg, now time.Time) (tea.Model, tea.Cmd, bool) {
+	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
+		return m, nil, false
+	}
+	if !m.statusIsErr || m.hasActiveConfirm() || m.statusMsg == "" {
+		return m, nil, false
+	}
+
+	inner := screenInnerWidth(m.width)
+	footerInner := inner - 2
+	layout := buildStatusErrorLayout(footerInner, m.statusBarRowY(), m.statusMsg)
+
+	if layout.showBtns && pointInHit(layout.selectHit, msg.X, msg.Y) {
+		if m.lastError == "" {
+			m.lastError = m.statusMsg
+		}
+		return m, m.openErrorModal(), true
+	}
+	if layout.showBtns && pointInHit(layout.copyHit, msg.X, msg.Y) {
+		if m.lastError == "" {
+			m.lastError = m.statusMsg
+		}
+		return m, m.copyLastError(), true
+	}
+	if pointInHit(layout.textHit, msg.X, msg.Y) {
+		if m.detailClick.register(msg.X, msg.Y, now) {
+			if m.lastError == "" {
+				m.lastError = m.statusMsg
+			}
+			return m, m.copyLastError(), true
+		}
+		return m, nil, false
+	}
+	return m, nil, false
 }

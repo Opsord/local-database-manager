@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ExternalLink, Eye, EyeOff, Lock, Save, Wand2, X } from 'lucide-react';
+import { Check, Copy, ExternalLink, Eye, EyeOff, Lock, Save, Wand2, X } from 'lucide-react';
 import type { AppMetadata, InstanceDTO, SaveInstanceRequest } from '../types';
 import { backend, extractErrorMessage } from '../lib/backend';
 
@@ -73,6 +73,18 @@ export const WizardDock: React.FC<WizardDockProps> = ({
   );
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [errorCopied, setErrorCopied] = useState<boolean>(false);
+
+  const handleCopyFormError = async () => {
+    if (!formError) return;
+    try {
+      await backend.copyText(formError);
+      setErrorCopied(true);
+      window.setTimeout(() => setErrorCopied(false), 1800);
+    } catch {
+      // ignore clipboard errors
+    }
+  };
 
   const availableVersions =
     engine === 'sqlserver' ? metadata.sqlserver_versions : metadata.postgres_versions;
@@ -176,6 +188,7 @@ export const WizardDock: React.FC<WizardDockProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
+    setErrorCopied(false);
     if (!name.trim()) {
       setFormError('Instance name is required.');
       return;
@@ -282,14 +295,28 @@ export const WizardDock: React.FC<WizardDockProps> = ({
       <form onSubmit={handleSubmit} className="overflow-y-auto p-4 space-y-3">
         {formError && (
           <div
-            className="px-3 py-1.5 rounded border text-[12px]"
+            className="px-3 py-1.5 rounded border text-[12px] flex items-start justify-between gap-2 select-text"
             style={{
               backgroundColor: 'rgba(224, 108, 117, 0.12)',
               borderColor: 'var(--status-stopped)',
               color: 'var(--status-stopped)',
             }}
           >
-            {formError}
+            <span className="break-words min-w-0">{formError}</span>
+            <button
+              type="button"
+              onClick={handleCopyFormError}
+              title="Copy error to clipboard"
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border shrink-0 hover:brightness-110 transition-colors"
+              style={{
+                backgroundColor: 'var(--bg-elevated)',
+                borderColor: errorCopied ? 'var(--status-ready)' : 'var(--status-stopped)',
+                color: errorCopied ? 'var(--status-ready)' : 'var(--status-stopped)',
+              }}
+            >
+              {errorCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+              <span>{errorCopied ? 'Copied' : 'Copy'}</span>
+            </button>
           </div>
         )}
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Check, Copy, X } from 'lucide-react';
 import { TitleBar } from './components/TitleBar';
 import { Sidebar } from './components/Sidebar';
 import { InspectorPane } from './components/InspectorPane';
@@ -85,7 +86,9 @@ export default function App() {
 
   const [statusMsg, setStatusMsg] = useState<string>('Ready.');
   const [statusIsErr, setStatusIsErr] = useState<boolean>(false);
+  const [errorCopied, setErrorCopied] = useState<boolean>(false);
   const statusTimerRef = useRef<number | null>(null);
+  const errorCopyTimerRef = useRef<number | null>(null);
 
   const [sidebarWidth, setSidebarWidth] = useState<number>(280);
   const resizingRef = useRef<boolean>(false);
@@ -113,15 +116,42 @@ export default function App() {
       window.clearTimeout(statusTimerRef.current);
       statusTimerRef.current = null;
     }
+    setErrorCopied(false);
     setStatusMsg(msg);
     setStatusIsErr(isErr);
-    if (clearAfterMs > 0) {
+    if (!isErr && clearAfterMs > 0) {
       statusTimerRef.current = window.setTimeout(() => {
         setStatusMsg('Ready.');
         setStatusIsErr(false);
       }, clearAfterMs);
     }
   }, []);
+
+  const dismissStatusError = useCallback(() => {
+    if (statusTimerRef.current !== null) {
+      window.clearTimeout(statusTimerRef.current);
+      statusTimerRef.current = null;
+    }
+    setErrorCopied(false);
+    setStatusMsg('Ready.');
+    setStatusIsErr(false);
+  }, []);
+
+  const handleCopyStatusError = useCallback(async () => {
+    if (!statusMsg) return;
+    try {
+      await backend.copyText(statusMsg);
+      if (errorCopyTimerRef.current !== null) {
+        window.clearTimeout(errorCopyTimerRef.current);
+      }
+      setErrorCopied(true);
+      errorCopyTimerRef.current = window.setTimeout(() => {
+        setErrorCopied(false);
+      }, 1800);
+    } catch {
+      // ignore clipboard errors while preserving error visibility
+    }
+  }, [statusMsg]);
 
   const refreshData = useCallback(async (showSpinner = false) => {
     if (!hasDesktopBridge() || refreshInFlightRef.current) return;
@@ -511,9 +541,16 @@ export default function App() {
         showStatus(`Deleting '${current.inst.name}'...`, false, 0);
         try {
           await backend.deleteInstance(current.inst.name);
+          const rt = (current.inst.runtime || 'docker').toLowerCase();
+          const notInstalled =
+            (rt === 'docker' && engines.docker === 'NOT_INSTALLED') ||
+            (rt === 'podman' && engines.podman === 'NOT_INSTALLED') ||
+            (rt !== 'docker' && rt !== 'podman');
           await refreshData(false);
           showStatus(
-            `Instance '${current.inst.name}' deleted (container, volume, and .env removed)`
+            notInstalled
+              ? `Instance '${current.inst.name}' deleted (.env removed; ${rt} not installed, container purge skipped)`
+              : `Instance '${current.inst.name}' deleted (container, volume, and .env removed)`
           );
         } catch (err) {
           showStatus(`Error: ${extractErrorMessage(err)}`, true, 6000);
@@ -597,7 +634,7 @@ export default function App() {
         break;
       }
     }
-  }, [confirm, handleStartEngine, handleStopEngine, refreshData, showStatus]);
+  }, [confirm, engines.docker, engines.podman, handleStartEngine, handleStopEngine, refreshData, showStatus]);
 
   const cancelConfirm = useCallback(async () => {
     if (!confirm) return;
@@ -844,6 +881,8 @@ export default function App() {
           setEditTarget(null);
         } else if (filterText) {
           setFilterText('');
+        } else if (statusIsErr) {
+          dismissStatusError();
         }
         return;
       }
@@ -1013,6 +1052,7 @@ export default function App() {
     closeLogsDock,
     confirm,
     dismissConfirm,
+    dismissStatusError,
     dockMode,
     editTarget,
     engines.docker,
@@ -1033,6 +1073,7 @@ export default function App() {
     selectInstance,
     selectedInstance,
     showStatus,
+    statusIsErr,
   ]);
 
   return (
@@ -1194,18 +1235,19 @@ export default function App() {
 
       {/* Zed-style Bottom Status Bar */}
       <footer
-        className="h-6 shrink-0 px-3 border-t flex items-center justify-between text-[11px] select-none"
+        className="h-6 shrink-0 px-3 border-t flex items-center justify-between gap-3 text-[11px] select-none"
         style={{
           backgroundColor: 'var(--bg-panel)',
           borderColor: 'var(--border-subtle)',
         }}
       >
-        <div className="flex items-center gap-2 min-w-0 truncate">
-          <span className="font-semibold" style={{ color: 'var(--text-muted)' }}>
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <span className="font-semibold shrink-0" style={{ color: 'var(--text-muted)' }}>
             Status:
           </span>
           <span
-            className="truncate font-medium"
+            title={statusIsErr ? statusMsg : undefined}
+            className={`truncate font-medium ${statusIsErr ? 'select-text cursor-text' : ''}`}
             style={{
               color: statusIsErr
                 ? 'var(--status-stopped)'
@@ -1217,6 +1259,33 @@ export default function App() {
             {busyAction ? `${busyAction}… ` : ''}
             {statusMsg}
           </span>
+          {statusIsErr && !confirm && (
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={handleCopyStatusError}
+                title="Copy error to clipboard"
+                className="flex items-center gap-1 px-1.5 py-0 rounded text-[10px] leading-4 border hover:brightness-110 transition-colors"
+                style={{
+                  backgroundColor: 'var(--bg-elevated)',
+                  borderColor: errorCopied ? 'var(--status-ready)' : 'var(--status-stopped)',
+                  color: errorCopied ? 'var(--status-ready)' : 'var(--status-stopped)',
+                }}
+              >
+                {errorCopied ? <Check className="w-2.5 h-2.5" /> : <Copy className="w-2.5 h-2.5" />}
+                <span>{errorCopied ? 'Copied' : 'Copy'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={dismissStatusError}
+                title="Dismiss error [Esc]"
+                className="p-0.5 rounded hover:brightness-110"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          )}
         </div>
 
         <div

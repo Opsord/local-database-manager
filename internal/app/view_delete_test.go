@@ -75,28 +75,39 @@ func TestDeleteInstanceRemovesEnvWhenOnline(t *testing.T) {
 	}
 }
 
-func TestDeleteInstanceRefusesWhenNotInstalled(t *testing.T) {
+func TestDeleteInstanceRemovesEnvWhenNotInstalled(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	envPath := filepath.Join(dir, "demo.env")
-	_ = os.WriteFile(envPath, []byte("ENGINE=postgres\nRUNTIME=docker\n"), 0644)
+	if err := os.WriteFile(envPath, []byte("ENGINE=postgres\nRUNTIME=docker\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	stub := &stubRunner{docker: core.EngineNotInstalled}
 	m := NewApp(dir, config.Config{EngineHealthInterval: time.Second})
 	m.runner = stub
 	inst := &core.DatabaseInstance{Name: "demo", Runtime: "docker", EnvFilePath: envPath}
 	msg := m.deleteInstanceCmd(inst)()
-	em, ok := msg.(errMsg)
+	done, ok := msg.(deleteDoneMsg)
 	if !ok {
-		t.Fatalf("got %T", msg)
+		t.Fatalf("got %T, want deleteDoneMsg", msg)
 	}
-	if !errors.Is(em.err, core.ErrEngineNotInstalled) {
-		t.Fatalf("want ErrEngineNotInstalled, got %v", em.err)
+	if done.err != nil {
+		t.Fatalf("unexpected delete error: %v", done.err)
+	}
+	if !done.skippedPurge || done.runtime != "docker" {
+		t.Fatalf("expected skippedPurge=true and runtime=docker, got %+v", done)
 	}
 	if stub.downVolumesCalls != 0 {
-		t.Fatal("must not purge when engine not installed")
+		t.Fatal("must not call DownVolumes when engine not installed")
 	}
-	if _, err := os.Stat(envPath); err != nil {
-		t.Fatal("env must remain")
+	if _, err := os.Stat(envPath); !os.IsNotExist(err) {
+		t.Fatal("expected .env removed when engine not installed")
+	}
+
+	updated, _ := m.Update(done)
+	am := updated.(*AppModel)
+	if !strings.Contains(am.statusMsg, "container purge skipped") {
+		t.Fatalf("expected skipped purge status, got %q", am.statusMsg)
 	}
 }
 

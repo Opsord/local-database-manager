@@ -387,7 +387,7 @@ func (s *Service) PurgeInstance(name string) (InstanceDTO, error) {
 	return toInstanceDTO(inst), nil
 }
 
-// DeleteInstance verifies engine health, purges container + volume, and deletes the .env file.
+// DeleteInstance verifies engine health, purges container + volume (when engine is installed), and deletes the .env file.
 func (s *Service) DeleteInstance(name string) error {
 	inst, err := s.findInstance(name)
 	if err != nil {
@@ -399,14 +399,13 @@ func (s *Service) DeleteInstance(name string) error {
 		runtimeName = "docker"
 	}
 	health := s.runner.CheckEngineHealth(ctx, runtimeName)
-	if health == core.EngineNotInstalled {
-		return fmt.Errorf("%w: %s — start is unavailable; cannot delete", core.ErrEngineNotInstalled, runtimeName)
-	}
 	if health == core.EngineOffline {
 		return fmt.Errorf("%s: %w: %s is offline — start it from Engines before deleting", core.ErrCodeEngineOffline, core.ErrEngineOffline, runtimeName)
 	}
-	if err := s.runner.DownVolumes(ctx, inst); err != nil {
-		return err
+	if health != core.EngineNotInstalled {
+		if err := s.runner.DownVolumes(ctx, inst); err != nil {
+			return err
+		}
 	}
 	if err := os.Remove(inst.EnvFilePath); err != nil && !os.IsNotExist(err) {
 		return err

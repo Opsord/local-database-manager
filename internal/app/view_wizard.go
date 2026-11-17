@@ -515,12 +515,11 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				val := w.inputs[idx].Value()
 				if val != "" {
 					if err := copyToClipboard(val); err != nil {
-						m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
-						m.statusIsErr = true
-					} else {
-						m.statusMsg = fmt.Sprintf("Copied '%s' to clipboard", val)
-						m.statusIsErr = false
+						m.setError(fmt.Sprintf("Failed to copy: %v", err))
+						return m, nil
 					}
+					m.statusMsg = fmt.Sprintf("Copied '%s' to clipboard", val)
+					m.statusIsErr = false
 					return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
 				}
 			}
@@ -539,16 +538,33 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				val := w.inputs[idx].Value()
 				if val != "" {
 					if err := copyToClipboard(val); err != nil {
-						m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
-						m.statusIsErr = true
-					} else {
-						m.statusMsg = fmt.Sprintf("Copied '%s' to clipboard", val)
-						m.statusIsErr = false
+						m.setError(fmt.Sprintf("Failed to copy: %v", err))
+						return m, nil
 					}
+					m.statusMsg = fmt.Sprintf("Copied '%s' to clipboard", val)
+					m.statusIsErr = false
 					return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
 				}
 			}
 			return m, nil
+
+		case "v", "!":
+			if !onText {
+				if m.lastError == "" && m.statusIsErr && !m.hasActiveConfirm() && m.statusMsg != "" {
+					m.lastError = m.statusMsg
+				}
+				if m.lastError != "" {
+					return m, m.openErrorModal()
+				}
+			}
+
+		case "C":
+			if !onText {
+				if cmd := m.copyLastError(); cmd != nil {
+					return m, cmd
+				}
+				return m, nil
+			}
 
 		case "esc":
 			m.mode = ModeMain
@@ -563,8 +579,7 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "o":
 			if w.kind == wizardEdit && !onText {
 				if err := core.OpenInEditor(w.sourceEnvPath); err != nil {
-					m.statusMsg = fmt.Sprintf("Failed to open editor: %v", err)
-					m.statusIsErr = true
+					m.setError(fmt.Sprintf("Failed to open editor: %v", err))
 				} else {
 					m.statusMsg = fmt.Sprintf("Opening %s in editor...", w.sourceEnvPath)
 					m.statusIsErr = false
@@ -576,8 +591,7 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if w.step == StepReview {
 				name := core.SanitizeIdent(w.inputs[0].Value())
 				if w.nameTaken(name) {
-					m.statusMsg = fmt.Sprintf("Instance name '%s' is already taken", name)
-					m.statusIsErr = true
+					m.setError(fmt.Sprintf("Instance name '%s' is already taken", name))
 					return m, nil
 				}
 
@@ -594,8 +608,7 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				if err := w.saveInstance(); err != nil {
-					m.statusMsg = fmt.Sprintf("Error saving instance: %v", err)
-					m.statusIsErr = true
+					m.setError(fmt.Sprintf("Error saving instance: %v", err))
 					return m, nil
 				}
 

@@ -79,16 +79,36 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "esc":
-			if m.confirmPurge || m.confirmDelete || m.confirmEngineStart || m.confirmEngineStop || m.confirmRestartAfterEdit || m.confirmQuitStopEngine || m.confirmUpdate {
+			if m.hasActiveConfirm() {
 				m.clearConfirms()
 				m.statusMsg = "Action cancelled"
 				m.statusIsErr = false
 				return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
 			}
+			if m.statusIsErr && m.statusMsg != "" {
+				m.statusMsg = ""
+				m.statusIsErr = false
+				return m, nil
+			}
 			return m, nil
 
 		case "?":
 			m.mode = ModeHelp
+			return m, nil
+
+		case "v", "!":
+			if m.lastError == "" && m.statusIsErr && !m.hasActiveConfirm() && m.statusMsg != "" {
+				m.lastError = m.statusMsg
+			}
+			if m.lastError != "" {
+				return m, m.openErrorModal()
+			}
+			return m, nil
+
+		case "C":
+			if cmd := m.copyLastError(); cmd != nil {
+				return m, cmd
+			}
 			return m, nil
 
 		case "/":
@@ -111,7 +131,7 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedIndex--
 				m.clearCopiedHit()
 			}
-			if m.confirmPurge || m.confirmDelete || m.confirmEngineStart || m.confirmEngineStop || m.confirmRestartAfterEdit || m.confirmQuitStopEngine || m.confirmUpdate {
+			if m.hasActiveConfirm() {
 				m.clearConfirms()
 				m.statusMsg = ""
 			}
@@ -123,7 +143,7 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedIndex++
 				m.clearCopiedHit()
 			}
-			if m.confirmPurge || m.confirmDelete || m.confirmEngineStart || m.confirmEngineStop || m.confirmRestartAfterEdit || m.confirmQuitStopEngine || m.confirmUpdate {
+			if m.hasActiveConfirm() {
 				m.clearConfirms()
 				m.statusMsg = ""
 			}
@@ -150,12 +170,11 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			uri := inst.ConnectionURI()
 			if err := core.CopyToClipboard(uri); err != nil {
-				m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
-				m.statusIsErr = true
-			} else {
-				m.statusMsg = fmt.Sprintf("URI for '%s' copied to clipboard!", inst.Name)
-				m.statusIsErr = false
+				m.setError(fmt.Sprintf("Failed to copy: %v", err))
+				return m, nil
 			}
+			m.statusMsg = fmt.Sprintf("URI for '%s' copied to clipboard!", inst.Name)
+			m.statusIsErr = false
 			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
 
 		case "E", "x":
@@ -165,12 +184,11 @@ func (m *AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			block := inst.BackendEnvBlock()
 			if err := core.CopyToClipboard(block); err != nil {
-				m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
-				m.statusIsErr = true
-			} else {
-				m.statusMsg = fmt.Sprintf("Backend .env block for '%s' copied to clipboard!", inst.Name)
-				m.statusIsErr = false
+				m.setError(fmt.Sprintf("Failed to copy: %v", err))
+				return m, nil
 			}
+			m.statusMsg = fmt.Sprintf("Backend .env block for '%s' copied to clipboard!", inst.Name)
+			m.statusIsErr = false
 			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
 
 		case "e":
@@ -467,19 +485,23 @@ func (m *AppModel) deleteInstanceCmd(inst *core.DatabaseInstance) tea.Cmd {
 			runtime = "docker"
 		}
 		health := m.runner.CheckEngineHealth(ctx, runtime)
-		if health == core.EngineNotInstalled {
-			return errMsg{fmt.Errorf("%w: %s — start is unavailable; cannot delete", core.ErrEngineNotInstalled, runtime)}
-		}
 		if health == core.EngineOffline {
 			return errMsg{fmt.Errorf("%w: %s is offline — start it from Engines (e) before deleting", core.ErrEngineOffline, runtime)}
 		}
-		if err := m.runner.DownVolumes(ctx, &instCopy); err != nil {
-			return errMsg{err}
+		skippedPurge := health == core.EngineNotInstalled
+		if !skippedPurge {
+			if err := m.runner.DownVolumes(ctx, &instCopy); err != nil {
+				return errMsg{err}
+			}
 		}
 		if err := os.Remove(instCopy.EnvFilePath); err != nil && !os.IsNotExist(err) {
 			return errMsg{err}
 		}
-		return deleteDoneMsg{name: instCopy.Name}
+		return deleteDoneMsg{
+			name:         instCopy.Name,
+			runtime:      runtime,
+			skippedPurge: skippedPurge,
+		}
 	}
 }
 
@@ -744,14 +766,43 @@ func (m *AppModel) viewMain() string {
 	panelGap := strings.Join(gapLines, "\n")
 	mainSplit := lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, panelGap, rightColumn)
 
-	statusLine := m.statusMsg
-	if statusLine == "" {
-		statusLine = "Ready."
-	}
-	if m.statusIsErr {
-		statusLine = lipgloss.NewStyle().Foreground(ErrorColor).Bold(true).Background(BgSurface).Render(statusLine)
+	footerInner := inner - 2
+
+	var statusContent string
+	if m.statusIsErr && !m.hasActiveConfirm() && m.statusMsg != "" {
+		layout := buildStatusErrorLayout(footerInner, 0, m.statusMsg)
+		errStyled := lipgloss.NewStyle().Foreground(ErrorColor).Bold(true).Background(BgSurface).Render(layout.shownMsg)
+		if layout.showBtns {
+			selectBtn := lipgloss.JoinHorizontal(lipgloss.Top,
+				KeyStyle.Render("[v]"),
+				surfaceGap(1),
+				KeyDescStyle.Render("Select"),
+			)
+			copyBtn := lipgloss.JoinHorizontal(lipgloss.Top,
+				KeyStyle.Render("[C]"),
+				surfaceGap(1),
+				KeyDescStyle.Render("Copy"),
+			)
+			statusContent = lipgloss.JoinHorizontal(lipgloss.Top,
+				errStyled,
+				surfaceGap(2),
+				selectBtn,
+				surfaceGap(2),
+				copyBtn,
+			)
+		} else {
+			statusContent = errStyled
+		}
 	} else {
-		statusLine = lipgloss.NewStyle().Foreground(SecondaryColor).Background(BgSurface).Render(statusLine)
+		statusLine := m.statusMsg
+		if statusLine == "" {
+			statusLine = "Ready."
+		}
+		if m.statusIsErr {
+			statusContent = lipgloss.NewStyle().Foreground(ErrorColor).Bold(true).Background(BgSurface).Render(statusLine)
+		} else {
+			statusContent = lipgloss.NewStyle().Foreground(SecondaryColor).Background(BgSurface).Render(statusLine)
+		}
 	}
 
 	shortcuts := mainShortcutEntries()
@@ -763,12 +814,11 @@ func (m *AppModel) viewMain() string {
 	case ModeEngineMenu:
 		shortcuts = engineShortcutEntries()
 	}
-	shortcutsBar := formatShortcutBar(inner-2, shortcuts)
+	shortcutsBar := formatShortcutBar(footerInner, shortcuts)
 
-	footerInner := inner - 2
 	statusRow := surfaceLine(footerInner, lipgloss.JoinHorizontal(lipgloss.Top,
-		lipgloss.NewStyle().Foreground(FgText).Background(BgSurface).Render("Status: "),
-		statusLine,
+		lipgloss.NewStyle().Foreground(FgText).Background(BgSurface).Render(statusPrefixText),
+		statusContent,
 	))
 	footer := StatusBarStyle.Width(inner).Render(
 		lipgloss.JoinVertical(

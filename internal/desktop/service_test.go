@@ -291,6 +291,31 @@ func TestStartStopPurgeAndDeleteInstance(t *testing.T) {
 	}
 }
 
+func TestDeleteInstanceWhenEngineNotInstalled(t *testing.T) {
+	svc, runner, instancesDir := setupTestService(t)
+	_, err := svc.SaveInstance(SaveInstanceRequest{
+		Engine:  "postgres",
+		Runtime: "docker",
+		Version: "18",
+		Name:    "legacy_docker",
+		Port:    "5443",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runner.dockerHealth = core.EngineNotInstalled
+	if err := svc.DeleteInstance("legacy_docker"); err != nil {
+		t.Fatalf("DeleteInstance() when engine not installed error = %v", err)
+	}
+	if len(runner.downCalls) != 0 {
+		t.Fatalf("expected no DownVolumes calls when engine not installed, got %d", len(runner.downCalls))
+	}
+	if _, statErr := os.Stat(filepath.Join(instancesDir, "legacy_docker.env")); !os.IsNotExist(statErr) {
+		t.Fatalf("expected legacy_docker.env to be removed, statErr=%v", statErr)
+	}
+}
+
 func TestSaveInstanceCreateDuplicateAndEditWhileRunning(t *testing.T) {
 	svc, runner, instancesDir := setupTestService(t)
 

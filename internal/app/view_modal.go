@@ -48,12 +48,11 @@ func (m *AppModel) getActionMenuItems(inst *core.DatabaseInstance) []actionMenuI
 				m.mode = ModeMain
 				uri := inst.ConnectionURI()
 				if err := core.CopyToClipboard(uri); err != nil {
-					m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
-					m.statusIsErr = true
-				} else {
-					m.statusMsg = fmt.Sprintf("URI for '%s' copied to clipboard!", inst.Name)
-					m.statusIsErr = false
+					m.setError(fmt.Sprintf("Failed to copy: %v", err))
+					return m, nil
 				}
+				m.statusMsg = fmt.Sprintf("URI for '%s' copied to clipboard!", inst.Name)
+				m.statusIsErr = false
 				return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
 			},
 		},
@@ -65,12 +64,11 @@ func (m *AppModel) getActionMenuItems(inst *core.DatabaseInstance) []actionMenuI
 				m.mode = ModeMain
 				block := inst.BackendEnvBlock()
 				if err := core.CopyToClipboard(block); err != nil {
-					m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
-					m.statusIsErr = true
-				} else {
-					m.statusMsg = fmt.Sprintf("Backend .env block for '%s' copied to clipboard!", inst.Name)
-					m.statusIsErr = false
+					m.setError(fmt.Sprintf("Failed to copy: %v", err))
+					return m, nil
 				}
+				m.statusMsg = fmt.Sprintf("Backend .env block for '%s' copied to clipboard!", inst.Name)
+				m.statusIsErr = false
 				return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
 			},
 		},
@@ -270,6 +268,8 @@ func (m *AppModel) viewHelp() string {
 		{"[Space]", "Start or Stop container instance"},
 		{"[c]", "Copy connection URI to clipboard"},
 		{"[Mouse]", "Double-click a value token in Details to copy it"},
+		{"[v / !]", "Open Error Details modal (mouse drag-select or keyboard select & copy)"},
+		{"[C]", "Copy last error message to clipboard"},
 		{"[E / x]", "Copy backend .env configuration block to clipboard"},
 		{"[l]", "Open live log streamer for selected container"},
 		{"[n]", "Create new database instance with step-by-step wizard"},

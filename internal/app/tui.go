@@ -28,6 +28,7 @@ const (
 	ModeActionMenu
 	ModeEngineMenu
 	ModeHelp
+	ModeError
 )
 
 type clearStatusMsg struct{}
@@ -42,8 +43,10 @@ type actionDoneMsg struct {
 }
 
 type deleteDoneMsg struct {
-	name string
-	err  error
+	name         string
+	runtime      string
+	skippedPurge bool
+	err          error
 }
 
 type restartAfterEditDoneMsg struct {
@@ -129,9 +132,25 @@ type AppModel struct {
 	detailClick clickTracker
 	copiedHit   *copyHit
 
+	lastError       string
+	errorReturnMode AppMode
+
 	// Sub-models
-	wizard wizardModel
-	logs   logsModel
+	wizard     wizardModel
+	logs       logsModel
+	errorModal errorModalModel
+}
+
+func (m *AppModel) hasActiveConfirm() bool {
+	return m.confirmPurge || m.confirmDelete || m.confirmEngineStart ||
+		m.confirmEngineStop || m.confirmRestartAfterEdit ||
+		m.confirmQuitStopEngine || m.confirmUpdate
+}
+
+func (m *AppModel) setError(msg string) {
+	m.statusMsg = msg
+	m.statusIsErr = true
+	m.lastError = msg
 }
 
 func (m *AppModel) finishEditRenameCleanup() {
@@ -373,13 +392,18 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case deleteDoneMsg:
 		if msg.err != nil {
-			m.statusMsg = fmt.Sprintf("Error: %v", msg.err)
-			m.statusIsErr = true
-			return m, tea.Batch(
-				tea.Tick(5*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }),
-			)
+			m.setError(fmt.Sprintf("Error: %v", msg.err))
+			return m, nil
 		}
-		m.statusMsg = fmt.Sprintf("Instance '%s' deleted (container, volume, and .env removed)", msg.name)
+		if msg.skippedPurge {
+			rt := msg.runtime
+			if rt == "" {
+				rt = "engine"
+			}
+			m.statusMsg = fmt.Sprintf("Instance '%s' deleted (.env removed; %s not installed, container purge skipped)", msg.name, rt)
+		} else {
+			m.statusMsg = fmt.Sprintf("Instance '%s' deleted (container, volume, and .env removed)", msg.name)
+		}
 		m.statusIsErr = false
 		return m, tea.Batch(
 			m.reloadInstancesCmd(),
@@ -388,12 +412,8 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case restartAfterEditDoneMsg:
 		if msg.err != nil {
-			m.statusMsg = fmt.Sprintf("Error restarting '%s': %v", msg.name, msg.err)
-			m.statusIsErr = true
-			return m, tea.Batch(
-				m.reloadInstancesCmd(),
-				tea.Tick(5*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }),
-			)
+			m.setError(fmt.Sprintf("Error restarting '%s': %v", msg.name, msg.err))
+			return m, m.reloadInstancesCmd()
 		}
 		m.finishEditRenameCleanup()
 		m.statusMsg = fmt.Sprintf("Instance '%s' restarted successfully!", msg.name)
@@ -404,14 +424,15 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 
 	case clearStatusMsg:
-		m.statusMsg = ""
+		if !m.statusIsErr {
+			m.statusMsg = ""
+		}
 		m.clearCopiedHit()
 		return m, nil
 
 	case errMsg:
-		m.statusMsg = fmt.Sprintf("Error: %v", msg.err)
-		m.statusIsErr = true
-		return m, tea.Tick(5*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
+		m.setError(fmt.Sprintf("Error: %v", msg.err))
+		return m, nil
 
 	case offlineStartMsg:
 		if m.engineStarting {
@@ -438,12 +459,8 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			runtimeName = "Docker"
 		}
 		if msg.err != nil {
-			m.statusMsg = fmt.Sprintf("Failed to start %s: %v", runtimeName, msg.err)
-			m.statusIsErr = true
-			return m, tea.Batch(
-				m.checkEngineHealthCmd(false),
-				tea.Tick(5*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }),
-			)
+			m.setError(fmt.Sprintf("Failed to start %s: %v", runtimeName, msg.err))
+			return m, m.checkEngineHealthCmd(false)
 		}
 		m.statusMsg = fmt.Sprintf("%s is online", runtimeName)
 		m.statusIsErr = false
@@ -465,12 +482,8 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			runtimeName = "Docker"
 		}
 		if msg.err != nil {
-			m.statusMsg = fmt.Sprintf("Failed to stop %s: %v", runtimeName, msg.err)
-			m.statusIsErr = true
-			return m, tea.Batch(
-				m.checkEngineHealthCmd(false),
-				tea.Tick(5*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }),
-			)
+			m.setError(fmt.Sprintf("Failed to stop %s: %v", runtimeName, msg.err))
+			return m, m.checkEngineHealthCmd(false)
 		}
 		m.statusMsg = fmt.Sprintf("%s is offline", runtimeName)
 		m.statusIsErr = false
@@ -486,9 +499,8 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateChecking = false
 		if msg.err != nil {
 			if msg.manual {
-				m.statusMsg = fmt.Sprintf("Update check failed: %v", msg.err)
-				m.statusIsErr = true
-				return m, tea.Tick(5*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
+				m.setError(fmt.Sprintf("Update check failed: %v", msg.err))
+				return m, nil
 			}
 			return m, nil
 		}
@@ -511,9 +523,8 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case updateAppliedMsg:
 		m.updating = false
 		if msg.err != nil {
-			m.statusMsg = fmt.Sprintf("Update failed: %v", msg.err)
-			m.statusIsErr = true
-			return m, tea.Tick(6*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} })
+			m.setError(fmt.Sprintf("Update failed: %v", msg.err))
+			return m, nil
 		}
 		if m.updateInfo != nil {
 			m.updateInfo.UpdateAvailable = false
@@ -525,7 +536,11 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		switch m.mode {
 		case ModeMain, ModeWizard, ModeActionMenu, ModeEngineMenu:
-			model, cmd, handled := m.handleDetailsMouse(msg)
+			model, cmd, handled := m.handleStatusErrorMouse(msg)
+			if handled {
+				return model, cmd
+			}
+			model, cmd, handled = m.handleDetailsMouse(msg)
 			if handled {
 				return model, cmd
 			}
@@ -544,6 +559,8 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateEngineMenu(msg)
 	case ModeHelp:
 		return m.updateHelp(msg)
+	case ModeError:
+		return m.updateErrorModal(msg)
 	default:
 		return m.updateMain(msg)
 	}
@@ -562,6 +579,8 @@ func (m *AppModel) View() string {
 		return m.wrapScreen(m.viewLogs())
 	case ModeHelp:
 		return m.wrapScreen(m.renderOverlay(m.viewHelp()))
+	case ModeError:
+		return m.wrapScreen(m.renderOverlay(m.viewErrorModal()))
 	case ModeActionMenu:
 		return m.wrapScreen(m.viewMain())
 	case ModeEngineMenu:
