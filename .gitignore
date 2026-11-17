@@ -8,6 +8,9 @@
 /db-manager.exe
 /db-manager-desktop
 /db-manager-desktop.exe
+dist-desktop/
+dist-installer/
+dist-installer-out/
 
 # Frontend dependencies & built bundle (only dist/.keep is tracked)
 frontend/node_modules/

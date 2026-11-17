@@ -33,7 +33,10 @@ go install github.com/Opsord/local-database-manager/cmd/db-manager@latest
 ```
 Run `db-manager` from any directory. On first launch, it automatically initializes `~/.db-manager` with default engine templates and `config.yml`.
 
-### Option 2: Precompiled Binaries (CLI/TUI & Desktop App)
+### Option 2: Windows Installer (`*-setup.exe`)
+Download `db-manager_Windows_x86_64-setup.exe` from the [Releases](https://github.com/Opsord/local-database-manager/releases) page. The wizard lets you choose whether to install the **Desktop Application**, the **CLI & Interactive TUI**, or **both**, and can optionally add `db-manager` to your user `PATH`.
+
+### Option 3: Portable Binaries (CLI/TUI & Desktop App)
 Download either the CLI/TUI archive (`db-manager_*`) or the native lightweight Wails Desktop app (`db-manager-desktop_*`) for Windows, macOS, or Linux from the [Releases](https://github.com/Opsord/local-database-manager/releases) page, extract it, and run `db-manager` or `db-manager-desktop`.
 
 ---

@@ -106,7 +106,11 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist-desktop/instances | Out-Null
-          go build -tags "desktop,production" -ldflags "-s -w -H windowsgui -X github.com/Opsord/local-database-manager/internal/version.Version=${{ github.ref_name }}" -o dist-desktop/db-manager-desktop.exe ./cmd/db-manager-desktop
+          $tag = "${{ github.ref_name }}"
+          $shortCommit = "${{ github.sha }}".Substring(0, 7)
+          $buildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+          $ldflagsDesktop = "-s -w -H windowsgui -X github.com/Opsord/local-database-manager/internal/version.Version=$tag -X github.com/Opsord/local-database-manager/internal/version.Commit=$shortCommit -X github.com/Opsord/local-database-manager/internal/version.Date=$buildDate"
+          go build -tags "desktop,production" -ldflags $ldflagsDesktop -o dist-desktop/db-manager-desktop.exe ./cmd/db-manager-desktop
           Copy-Item README.md, LICENSE, config.yml dist-desktop/
           Copy-Item -Recurse engines dist-desktop/engines
           Copy-Item instances/.env.template dist-desktop/instances/.env.template
@@ -114,6 +118,70 @@ jobs:
           Compress-Archive -Path dist-desktop/* -DestinationPath $archive -Force
           $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
           "$hash  $archive" | Out-File -Encoding ascii "$archive.sha256"
+
+      - name: Build Windows installer (Inno Setup)
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path dist-installer | Out-Null
+
+          $tag = "${{ github.ref_name }}"
+          $shortCommit = "${{ github.sha }}".Substring(0, 7)
+          $buildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+          $ldflagsCli = "-s -w -X github.com/Opsord/local-database-manager/internal/version.Version=$tag -X github.com/Opsord/local-database-manager/internal/version.Commit=$shortCommit -X github.com/Opsord/local-database-manager/internal/version.Date=$buildDate"
+
+          $env:CGO_ENABLED = "0"
+          go build -ldflags $ldflagsCli -o dist-installer/db-manager.exe ./cmd/db-manager
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          Copy-Item dist-desktop/db-manager-desktop.exe, README.md, LICENSE dist-installer/
+
+          $iscc = $null
+          $isccCmd = Get-Command iscc -ErrorAction SilentlyContinue
+          if ($isccCmd) {
+            $iscc = $isccCmd.Source
+          }
+          if (-not $iscc) {
+            foreach ($candidate in @(
+              "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+              "C:\Program Files\Inno Setup 6\ISCC.exe"
+            )) {
+              if (Test-Path $candidate) {
+                $iscc = $candidate
+                break
+              }
+            }
+          }
+          if (-not $iscc) {
+            choco install innosetup -y --no-progress
+            $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          }
+          if (-not (Test-Path $iscc)) {
+            throw "Inno Setup compiler (ISCC.exe) not found."
+          }
+
+          $numericVersion = "0.0.0.0"
+          if ($tag -match '^v?(\d+\.\d+\.\d+)') {
+            $numericVersion = "$($Matches[1]).0"
+          }
+
+          $sourceDir = (Resolve-Path "dist-installer").Path
+          $outputDir = (Get-Location).Path
+          $setupName = "db-manager_Windows_x86_64-setup"
+
+          & $iscc `
+            "/DAppVersion=$tag" `
+            "/DNumericVersion=$numericVersion" `
+            "/DSourceDir=$sourceDir" `
+            "/DOutputDir=$outputDir" `
+            "/DOutputBaseFilename=$setupName" `
+            "build\windows\installer.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $setupExe = "$setupName.exe"
+          $hash = (Get-FileHash $setupExe -Algorithm SHA256).Hash.ToLower()
+          "$hash  $setupExe" | Out-File -Encoding ascii "$setupExe.sha256"
 
       - name: Build and package Linux desktop archive
         if: matrix.goos == 'linux'
@@ -162,7 +230,20 @@ jobs:
           (cd dist-desktop && zip -r "../$ARCHIVE" .)
           shasum -a 256 "$ARCHIVE" > "${ARCHIVE}.sha256"
 
+      - name: Upload Windows artifacts to GitHub Release
+        if: matrix.goos == 'windows'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          gh release upload "${{ github.ref_name }}"
+          "db-manager-desktop_${{ matrix.target }}.${{ matrix.ext }}"
+          "db-manager-desktop_${{ matrix.target }}.${{ matrix.ext }}.sha256"
+          "db-manager_Windows_x86_64-setup.exe"
+          "db-manager_Windows_x86_64-setup.exe.sha256"
+          --clobber
+
       - name: Upload desktop artifacts to GitHub Release
+        if: matrix.goos != 'windows'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${{ github.ref_name }}" "db-manager-desktop_${{ matrix.target }}.${{ matrix.ext }}" "db-manager-desktop_${{ matrix.target }}.${{ matrix.ext }}.sha256" --clobber
